@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # NATS Cluster para Event Mesh
+  nats:
+    image: nats:2.9-alpine
+    container_name: nats-cluster
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+      - "6222:6222"
+    command: 
+      - "--config"
+      - "/etc/nats/nats.conf"
+    volumes:
+      - ./k8s/nats-config.yaml:/etc/nats/nats.conf:ro
+    environment:
+      - NATS_SERVER_NAME=nats-cluster
+    networks:
+      - mediplus-network
+
+  # DynamoDB Local para desarrollo
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: dynamodb-local
+    ports:
+      - "8000:8000"
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    environment:
+      - AWS_ACCESS_KEY_ID=dummy
+      - AWS_SECRET_ACCESS_KEY=dummy
+      - AWS_DEFAULT_REGION=us-east-1
+    networks:
+      - mediplus-network
+
+  # Supplier Service
+  supplier-service:
+    build:
+      context: .
+      dockerfile: supplier-service/Dockerfile
+    container_name: supplier-service
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - AWS_REGION=us-east-1
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - NATS_URL=nats://nats:4222
+      - ENVIRONMENT=development
+    depends_on:
+      - nats
+      - dynamodb-local
+    networks:
+      - mediplus-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Purchase Order Service
+  purchase-order-service:
+    build:
+      context: .
+      dockerfile: purchase-order-service/Dockerfile
+    container_name: purchase-order-service
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - AWS_REGION=us-east-1
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - NATS_URL=nats://nats:4222
+      - SUPPLIER_SERVICE_URL=http://supplier-service:8080
+      - ENVIRONMENT=development
+    depends_on:
+      - nats
+      - dynamodb-local
+      - supplier-service
+    networks:
+      - mediplus-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Script para crear tablas de DynamoDB
+  create-tables:
+    image: amazon/aws-cli:latest
+    container_name: create-tables
+    depends_on:
+      - dynamodb-local
+    environment:
+      - AWS_ACCESS_KEY_ID=dummy
+      - AWS_SECRET_ACCESS_KEY=dummy
+      - AWS_DEFAULT_REGION=us-east-1
+    command: >
+      sh -c "
+        sleep 10 &&
+        aws dynamodb create-table --table-name suppliers --attribute-definitions AttributeName=proveedor_id,AttributeType=S AttributeName=estado_proveedor,AttributeType=S --key-schema AttributeName=proveedor_id,KeyType=HASH --global-secondary-indexes IndexName=estado-index,KeySchema='[{AttributeName=estado_proveedor,KeyType=HASH}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 --endpoint-url http://dynamodb-local:8000 || echo 'Table suppliers already exists' &&
+        aws dynamodb create-table --table-name audit_traces --attribute-definitions AttributeName=traza_id,AttributeType=S AttributeName=proveedor_id,AttributeType=S AttributeName=fecha_cambio,AttributeType=S --key-schema AttributeName=traza_id,KeyType=HASH --global-secondary-indexes IndexName=proveedor-fecha-index,KeySchema='[{AttributeName=proveedor_id,KeyType=HASH},{AttributeName=fecha_cambio,KeyType=RANGE}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 --endpoint-url http://dynamodb-local:8000 || echo 'Table audit_traces already exists' &&
+        aws dynamodb create-table --table-name orders --attribute-definitions AttributeName=orden_id,AttributeType=S AttributeName=estado_orden,AttributeType=S AttributeName=proveedor_id,AttributeType=S AttributeName=fecha_generacion,AttributeType=S --key-schema AttributeName=orden_id,KeyType=HASH --global-secondary-indexes IndexName=estado-index,KeySchema='[{AttributeName=estado_orden,KeyType=HASH}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' IndexName=proveedor-fecha-index,KeySchema='[{AttributeName=proveedor_id,KeyType=HASH},{AttributeName=fecha_generacion,KeyType=RANGE}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 --endpoint-url http://dynamodb-local:8000 || echo 'Table orders already exists' &&
+        aws dynamodb create-table --table-name products --attribute-definitions AttributeName=producto_id,AttributeType=S AttributeName=stock_actual,AttributeType=N --key-schema AttributeName=producto_id,KeyType=HASH --global-secondary-indexes IndexName=stock-index,KeySchema='[{AttributeName=stock_actual,KeyType=HASH}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 --endpoint-url http://dynamodb-local:8000 || echo 'Table products already exists' &&
+        echo 'All tables created successfully'
+      "
+    networks:
+      - mediplus-network
+
+networks:
+  mediplus-network:
+    driver: bridge

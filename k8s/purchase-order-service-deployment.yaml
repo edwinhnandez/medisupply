@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: purchase-order-service
+  labels:
+    app: purchase-order-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: purchase-order-service
+  template:
+    metadata:
+      labels:
+        app: purchase-order-service
+    spec:
+      containers:
+      - name: purchase-order-service
+        image: mediplus/purchase-order-service:latest
+        ports:
+        - containerPort: 8081
+        env:
+        - name: PORT
+          value: "8081"
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: NATS_URL
+          value: "nats://nats-cluster:4222"
+        - name: SUPPLIER_SERVICE_URL
+          value: "http://supplier-service:8080"
+        - name: ENVIRONMENT
+          value: "production"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: purchase-order-service
+spec:
+  selector:
+    app: purchase-order-service
+  ports:
+  - port: 8081
+    targetPort: 8081
+  type: ClusterIP

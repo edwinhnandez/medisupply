@@ -1,0 +1,30 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: supplier-service-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: supplier-service
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+  - type: nats
+    metadata:
+      natsServerMonitoringEndpoint: "nats://nats-cluster:8222"
+      queueGroup: "supplier.events"
+      queueSubject: "supplier.events"
+      lagThreshold: "5"
+  - type: prometheus
+    metadata:
+      serverAddress: "http://prometheus:9090"
+      metricName: "supplier_requests_per_second"
+      threshold: "10"
+      query: "rate(http_requests_total{job=\"supplier-service\"}[1m])"
+  - type: cpu
+    metadata:
+      type: Utilization
+      value: "70"
+  pollingInterval: 30
+  cooldownPeriod: 300
+  idleReplicaCount: 1
