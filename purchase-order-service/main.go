@@ -49,6 +49,15 @@ func main() {
 
 	// Inicializar handlers
 	orderHandler := handlers.NewOrderHandler(orderService, logger)
+	externalEventHandler := handlers.NewExternalEventHandler(orderService, logger)
+	externalSimulatorHandler := handlers.NewExternalSimulatorHandler(eventBus, logger)
+
+	// Suscribirse a eventos externos para creación automática de órdenes
+	err = eventBus.Subscribe(events.TopicExternalEvents, "purchase-order-external-events", externalEventHandler.HandleExternalEvent)
+	if err != nil {
+		logger.Fatalf("Error subscribing to external events: %v", err)
+	}
+	logger.Info("Subscribed to external events for auto order generation")
 
 	// Configurar rutas
 	router := gin.Default()
@@ -68,6 +77,19 @@ func main() {
 			orders.POST("/:id/confirm", orderHandler.ConfirmOrder)
 			orders.POST("/:id/receive", orderHandler.ReceiveOrder)
 			orders.POST("/auto-generate", orderHandler.AutoGenerateOrder)
+		}
+
+		// Rutas para simulación de eventos externos
+		external := v1.Group("/external")
+		{
+			external.GET("/event-types", externalSimulatorHandler.GetExternalEventTypes)
+			simulate := external.Group("/simulate")
+			{
+				simulate.POST("/stock-bajo", externalSimulatorHandler.SimulateStockBajoExterno)
+				simulate.POST("/demanda-alta", externalSimulatorHandler.SimulateDemandaAltaExterna)
+				simulate.POST("/lote-danado", externalSimulatorHandler.SimulateLoteDanadoExterno)
+				simulate.POST("/alerta-inventario", externalSimulatorHandler.SimulateAlertaInventarioExterna)
+			}
 		}
 	}
 

@@ -20,6 +20,7 @@ const (
 	TopicNotifications   = "notifications.events"
 	TopicStockEvents     = "stock.events"
 	TopicOrderEvents     = "order.events"
+	TopicExternalEvents  = "external.events"
 )
 
 // Eventos del dominio
@@ -168,6 +169,81 @@ type PronosticoDemandaAltaEvent struct {
 	} `json:"data"`
 }
 
+// Eventos externos que pueden disparar creación automática de órdenes
+
+// StockBajoExternoEvent se emite por sistemas externos cuando el stock está bajo
+type StockBajoExternoEvent struct {
+	EventID    string    `json:"event_id"`
+	EventType  string    `json:"event_type"`
+	ProductoID string    `json:"producto_id"`
+	Timestamp  time.Time `json:"timestamp"`
+	Source     string    `json:"source"` // Sistema que emite el evento
+	Data       struct {
+		NombreProducto    string `json:"nombre_producto"`
+		StockActual       int    `json:"stock_actual"`
+		PuntoReorden      int    `json:"punto_reorden"`
+		StockMaximo       int    `json:"stock_maximo"`
+		CantidadRequerida int    `json:"cantidad_requerida"`
+		Prioridad         string `json:"prioridad"`
+		Urgencia          string `json:"urgencia"`
+	} `json:"data"`
+}
+
+// DemandaAltaExternaEvent se emite por sistemas de pronóstico externos
+type DemandaAltaExternaEvent struct {
+	EventID    string    `json:"event_id"`
+	EventType  string    `json:"event_type"`
+	ProductoID string    `json:"producto_id"`
+	Timestamp  time.Time `json:"timestamp"`
+	Source     string    `json:"source"` // Sistema que emite el evento
+	Data       struct {
+		NombreProducto      string  `json:"nombre_producto"`
+		DemandaPronosticada int     `json:"demanda_pronosticada"`
+		StockActual         int     `json:"stock_actual"`
+		CantidadRequerida   int     `json:"cantidad_requerida"`
+		ConfianzaPronostico float64 `json:"confianza_pronostico"`
+		PeriodoPronostico   string  `json:"periodo_pronostico"`
+		Prioridad           string  `json:"prioridad"`
+	} `json:"data"`
+}
+
+// LoteDanadoExternoEvent se emite por sistemas de monitoreo externos
+type LoteDanadoExternoEvent struct {
+	EventID    string    `json:"event_id"`
+	EventType  string    `json:"event_type"`
+	ProductoID string    `json:"producto_id"`
+	Timestamp  time.Time `json:"timestamp"`
+	Source     string    `json:"source"` // Sistema que emite el evento
+	Data       struct {
+		NombreProducto        string  `json:"nombre_producto"`
+		LoteID                string  `json:"lote_id"`
+		CantidadDanada        int     `json:"cantidad_danada"`
+		TemperaturaRegistrada float64 `json:"temperatura_registrada"`
+		TemperaturaRequerida  float64 `json:"temperatura_requerida"`
+		MotivoDanio           string  `json:"motivo_danio"`
+		Urgencia              string  `json:"urgencia"`
+	} `json:"data"`
+}
+
+// AlertaInventarioExternaEvent se emite por sistemas de inventario externos
+type AlertaInventarioExternaEvent struct {
+	EventID    string    `json:"event_id"`
+	EventType  string    `json:"event_type"`
+	ProductoID string    `json:"producto_id"`
+	Timestamp  time.Time `json:"timestamp"`
+	Source     string    `json:"source"` // Sistema que emite el evento
+	Data       struct {
+		NombreProducto    string `json:"nombre_producto"`
+		TipoAlerta        string `json:"tipo_alerta"`
+		Descripcion       string `json:"descripcion"`
+		StockActual       int    `json:"stock_actual"`
+		StockMinimo       int    `json:"stock_minimo"`
+		CantidadRequerida int    `json:"cantidad_requerida"`
+		Prioridad         string `json:"prioridad"`
+		FechaVencimiento  string `json:"fecha_vencimiento,omitempty"`
+	} `json:"data"`
+}
+
 // Constantes para los tipos de eventos
 const (
 	EventTypeProveedorCalificado    = "proveedor.calificado"
@@ -182,4 +258,9 @@ const (
 	EventTypeStockBajo              = "stock.bajo"
 	EventTypeLoteDanado             = "stock.lote_danado"
 	EventTypePronosticoDemandaAlta  = "stock.demanda_alta"
+	// Eventos externos
+	EventTypeStockBajoExterno        = "external.stock.bajo"
+	EventTypeDemandaAltaExterna      = "external.demanda.alta"
+	EventTypeLoteDanadoExterno       = "external.lote.danado"
+	EventTypeAlertaInventarioExterna = "external.alerta.inventario"
 )
