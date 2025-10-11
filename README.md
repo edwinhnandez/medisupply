@@ -1,4 +1,4 @@
-# MediPlus - Sistema de Gestión de Aprovisionamiento
+# MediSupply - Sistema de Gestión de Aprovisionamiento
 
 Sistema de microservicios para la gestión de aprovisionamiento médico basado en Domain-Driven Design (DDD) con event mesh y escalado automático mediante KEDA.
 
@@ -30,7 +30,7 @@ El sistema está compuesto por dos microservicios principales:
 ## Estructura del Proyecto
 
 ```
-mediplus/
+medisupply/
 ├── supplier-service/           # Microservicio de proveedores
 │   ├── main.go
 │   ├── Dockerfile
@@ -205,7 +205,7 @@ El sistema utiliza KEDA para el escalado automático basado en:
 1. **Clonar el repositorio**
 ```bash
 git clone <repository-url>
-cd mediplus
+cd medisupply
 ```
 
 2. **Ejecutar con Docker Compose**
