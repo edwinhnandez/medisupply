@@ -32,23 +32,25 @@ echo "Purchase Order Service: $ORDER_ECR_URI"
 echo ""
 
 # Verificar que los archivos tar existen
-if [ ! -f "medisupply-supplier-service.tar" ]; then
-    echo "Error: medisupply-supplier-service.tar no encontrado"
+if [ ! -f "docker-images/medisupply-supplier-service.tar" ]; then
+    echo "Error: docker-images/medisupply-supplier-service.tar no encontrado"
+    echo "Ejecuta primero: ./scripts/export-docker-images.sh"
     exit 1
 fi
 
-if [ ! -f "medisupply-purchase-order-service.tar" ]; then
-    echo "Error: medisupply-purchase-order-service.tar no encontrado"
+if [ ! -f "docker-images/medisupply-purchase-order-service.tar" ]; then
+    echo "Error: docker-images/medisupply-purchase-order-service.tar no encontrado"
+    echo "Ejecuta primero: ./scripts/export-docker-images.sh"
     exit 1
 fi
 
 # Cargar imágenes desde archivos tar
 echo "=== Cargando imágenes desde archivos tar ==="
 echo "Cargando supplier-service..."
-docker load -i medisupply-supplier-service.tar
+docker load -i docker-images/medisupply-supplier-service.tar
 
 echo "Cargando purchase-order-service..."
-docker load -i medisupply-purchase-order-service.tar
+docker load -i docker-images/medisupply-purchase-order-service.tar
 
 # Autenticar Docker con ECR
 echo "=== Autenticando Docker con ECR ==="
@@ -91,5 +93,5 @@ echo "image: $SUPPLIER_ECR_URI:latest"
 echo "image: $ORDER_ECR_URI:latest"
 echo ""
 echo "Archivos tar disponibles para distribución:"
-echo "- medisupply-supplier-service.tar ($(du -h medisupply-supplier-service.tar | cut -f1))"
-echo "- medisupply-purchase-order-service.tar ($(du -h medisupply-purchase-order-service.tar | cut -f1))"
+echo "- docker-images/medisupply-supplier-service.tar ($(du -h docker-images/medisupply-supplier-service.tar | cut -f1))"
+echo "- docker-images/medisupply-purchase-order-service.tar ($(du -h docker-images/medisupply-purchase-order-service.tar | cut -f1))"

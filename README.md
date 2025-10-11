@@ -200,6 +200,16 @@ El sistema utiliza KEDA para el escalado automático basado en:
 - Go 1.23+
 - AWS CLI (para DynamoDB local)
 
+### Nota sobre Imágenes Docker
+Las imágenes Docker exportadas (.tar) exceden el límite de 100MB de GitHub y no están incluidas en el repositorio. Para generar las imágenes cuando sea necesario, usa:
+
+```bash
+# Generar imágenes de Docker
+./scripts/export-docker-images.sh
+```
+
+Ver `DOCKER_IMAGES.md` para más detalles sobre el manejo de imágenes.
+
 ### Ejecutar el Sistema
 
 1. **Clonar el repositorio**
