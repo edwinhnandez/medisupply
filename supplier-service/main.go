@@ -33,10 +33,10 @@ func main() {
 		logger.Fatalf("Error connecting to DynamoDB: %v", err)
 	}
 
-	// Inicializar NATS para eventos
-	eventBus, err := events.NewNATSEventBus(cfg.NATSURL)
+	// Inicializar RabbitMQ para eventos
+	eventBus, err := events.NewRabbitMQEventBus(cfg.RabbitMQURL, logger)
 	if err != nil {
-		logger.Fatalf("Error connecting to NATS: %v", err)
+		logger.Fatalf("Error connecting to RabbitMQ: %v", err)
 	}
 	defer eventBus.Close()
 

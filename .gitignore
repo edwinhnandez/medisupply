@@ -1,0 +1,24 @@
+# Binaries for Go applications
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.prof
+
+# Build artifacts
+# For example, if your project builds to a 'bin' directory
+bin/
+
+# Dependency management (if not using modules or if vendoring is explicitly ignored)
+# If using Go Modules, the 'vendor/' directory is often included in source control,
+# but it can be ignored if desired and managed separately.
+vendor/
+
+# Operating System and Editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

@@ -8,7 +8,7 @@ type Config struct {
 	Port               string
 	AWSRegion          string
 	DynamoDBEndpoint   string
-	NATSURL            string
+	RabbitMQURL        string
 	Environment        string
 	SupplierServiceURL string
 }
@@ -18,7 +18,7 @@ func Load() *Config {
 		Port:               getEnv("PORT", "8081"),
 		AWSRegion:          getEnv("AWS_REGION", "us-east-1"),
 		DynamoDBEndpoint:   getEnv("DYNAMODB_ENDPOINT", ""),
-		NATSURL:            getEnv("NATS_URL", "nats://localhost:4222"),
+		RabbitMQURL:        getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
 		Environment:        getEnv("ENVIRONMENT", "development"),
 		SupplierServiceURL: getEnv("SUPPLIER_SERVICE_URL", "http://localhost:8080"),
 	}
