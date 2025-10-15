@@ -1,0 +1,181 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+data:
+  rabbitmq.conf: |
+    # RabbitMQ Configuration
+    listeners.tcp.default = 5672
+    management.tcp.port = 15672
+    default_user = mediplus
+    default_pass = mediplus123
+    default_vhost = /
+    
+    # Logging
+    log.console = true
+    log.console.level = info
+    
+    # Memory and disk limits
+    vm_memory_high_watermark.relative = 0.6
+    disk_free_limit.relative = 2.0
+    
+    # Cluster configuration (for future scaling)
+    cluster_formation.peer_discovery_backend = rabbit_peer_discovery_classic_config
+    cluster_formation.classic_config.nodes.1 = rabbit@rabbitmq-0.rabbitmq-headless.default.svc.cluster.local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    app: rabbitmq
+spec:
+  ports:
+  - port: 5672
+    targetPort: 5672
+    name: amqp
+  - port: 15672
+    targetPort: 15672
+    name: management
+  selector:
+    app: rabbitmq
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-headless
+  labels:
+    app: rabbitmq
+spec:
+  ports:
+  - port: 5672
+    targetPort: 5672
+    name: amqp
+  - port: 15672
+    targetPort: 15672
+    name: management
+  selector:
+    app: rabbitmq
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+spec:
+  serviceName: rabbitmq-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3.12-management-alpine
+        ports:
+        - containerPort: 5672
+          name: amqp
+        - containerPort: 15672
+          name: management
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          value: "mediplus"
+        - name: RABBITMQ_DEFAULT_PASS
+          value: "mediplus123"
+        - name: RABBITMQ_DEFAULT_VHOST
+          value: "/"
+        - name: RABBITMQ_ERLANG_COOKIE
+          value: "SWQOKODSQALRPCLNMEQG"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/rabbitmq/rabbitmq.conf
+          subPath: rabbitmq.conf
+        - name: data
+          mountPath: /var/lib/rabbitmq
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - ping
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: rabbitmq-config
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rabbitmq-init
+spec:
+  template:
+    spec:
+      containers:
+      - name: rabbitmq-init
+        image: rabbitmq:3.12-management-alpine
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          value: "mediplus"
+        - name: RABBITMQ_DEFAULT_PASS
+          value: "mediplus123"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Waiting for RabbitMQ to be ready..."
+          until rabbitmq-diagnostics -q ping; do
+            echo "RabbitMQ is not ready yet..."
+            sleep 2
+          done
+          
+          echo "Creating exchanges and queues..."
+          
+          # Create exchanges
+          rabbitmqadmin -u mediplus -p mediplus123 declare exchange name=supplier.events type=topic
+          rabbitmqadmin -u mediplus -p mediplus123 declare exchange name=order.events type=topic
+          rabbitmqadmin -u mediplus -p mediplus123 declare exchange name=external.events type=topic
+          
+          # Create queues
+          rabbitmqadmin -u mediplus -p mediplus123 declare queue name=supplier-events durable=true
+          rabbitmqadmin -u mediplus -p mediplus123 declare queue name=order-events durable=true
+          rabbitmqadmin -u mediplus -p mediplus123 declare queue name=purchase-order-external-events durable=true
+          
+          # Create bindings
+          rabbitmqadmin -u mediplus -p mediplus123 declare binding source=supplier.events destination=supplier-events routing_key="#"
+          rabbitmqadmin -u mediplus -p mediplus123 declare binding source=order.events destination=order-events routing_key="#"
+          rabbitmqadmin -u mediplus -p mediplus123 declare binding source=external.events destination=purchase-order-external-events routing_key="#"
+          
+          echo "RabbitMQ initialization completed!"
+      restartPolicy: OnFailure
+  backoffLimit: 3

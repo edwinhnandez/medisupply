@@ -1,0 +1,282 @@
+---
+- name: Deploy Medisupply Microservices to Kubernetes
+  hosts: minikube
+  become: yes
+  become_user: ubuntu
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    KUBECONFIG: /home/ubuntu/.kube/config
+    DOCKERHUB_USERNAME: "edwinhc93"  # Your Docker Hub username
+    NAMESPACE: "default"
+    
+  tasks:
+    - name: Set KUBECONFIG environment variable
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: echo "KUBECONFIG set to {{ KUBECONFIG }}"
+      
+    - name: Verify kubectl access
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      command: kubectl get nodes
+      register: kubectl_check
+      retries: 5
+      delay: 10
+      until: kubectl_check.rc == 0
+      
+    - name: Create namespace if it doesn't exist
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get namespace {{ NAMESPACE }} >/dev/null 2>&1 || kubectl create namespace {{ NAMESPACE }}
+      args:
+        executable: /bin/bash
+        
+    - name: Wait for Istio to be ready
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get pods -n istio-system --field-selector=status.phase=Running | grep -E "(istiod|istio-ingressgateway)" | wc -l
+      register: istio_ready
+      retries: 30
+      delay: 10
+      until: istio_ready.stdout|int >= 2
+      
+    - name: Deploy ConfigMaps and Secrets
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl apply -f /home/ubuntu/medisupply/k8s/configmaps-secrets.yaml
+      args:
+        executable: /bin/bash
+      register: configmaps_result
+      
+    - name: Deploy DynamoDB Local
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl apply -f /home/ubuntu/medisupply/k8s/dynamodb-local.yaml
+      args:
+        executable: /bin/bash
+      register: dynamodb_result
+      
+    - name: Wait for DynamoDB Local to be ready
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get pods -l app=dynamodb-local --field-selector=status.phase=Running | wc -l
+      register: dynamodb_ready
+      retries: 20
+      delay: 10
+      until: dynamodb_ready.stdout|int >= 1
+      
+    - name: Create DynamoDB tables
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        # Install AWS CLI if not present
+        which aws || (curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && sudo ./aws/install)
+        
+        # Create tables
+        aws dynamodb create-table \
+          --table-name suppliers \
+          --attribute-definitions \
+            AttributeName=proveedor_id,AttributeType=S \
+            AttributeName=estado_proveedor,AttributeType=S \
+          --key-schema \
+            AttributeName=proveedor_id,KeyType=HASH \
+          --global-secondary-indexes \
+            IndexName=estado-index,KeySchema='[{AttributeName=estado_proveedor,KeyType=HASH}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' \
+          --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+          --endpoint-url http://localhost:8000 \
+          --region us-east-1 || echo "Table suppliers already exists"
+          
+        aws dynamodb create-table \
+          --table-name audit_traces \
+          --attribute-definitions \
+            AttributeName=traza_id,AttributeType=S \
+            AttributeName=proveedor_id,AttributeType=S \
+            AttributeName=fecha_cambio,AttributeType=S \
+          --key-schema \
+            AttributeName=traza_id,KeyType=HASH \
+          --global-secondary-indexes \
+            IndexName=proveedor-fecha-index,KeySchema='[{AttributeName=proveedor_id,KeyType=HASH},{AttributeName=fecha_cambio,KeyType=RANGE}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' \
+          --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+          --endpoint-url http://localhost:8000 \
+          --region us-east-1 || echo "Table audit_traces already exists"
+          
+        aws dynamodb create-table \
+          --table-name orders \
+          --attribute-definitions \
+            AttributeName=orden_id,AttributeType=S \
+            AttributeName=estado_orden,AttributeType=S \
+            AttributeName=proveedor_id,AttributeType=S \
+            AttributeName=fecha_generacion,AttributeType=S \
+          --key-schema \
+            AttributeName=orden_id,KeyType=HASH \
+          --global-secondary-indexes \
+            IndexName=estado-index,KeySchema='[{AttributeName=estado_orden,KeyType=HASH}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' \
+            IndexName=proveedor-fecha-index,KeySchema='[{AttributeName=proveedor_id,KeyType=HASH},{AttributeName=fecha_generacion,KeyType=RANGE}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' \
+          --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+          --endpoint-url http://localhost:8000 \
+          --region us-east-1 || echo "Table orders already exists"
+          
+        aws dynamodb create-table \
+          --table-name products \
+          --attribute-definitions \
+            AttributeName=producto_id,AttributeType=S \
+            AttributeName=stock_actual,AttributeType=N \
+          --key-schema \
+            AttributeName=producto_id,KeyType=HASH \
+          --global-secondary-indexes \
+            IndexName=stock-index,KeySchema='[{AttributeName=stock_actual,KeyType=HASH}]',Projection='{ProjectionType=ALL}',ProvisionedThroughput='{ReadCapacityUnits=5,WriteCapacityUnits=5}' \
+          --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+          --endpoint-url http://localhost:8000 \
+          --region us-east-1 || echo "Table products already exists"
+      args:
+        executable: /bin/bash
+      register: tables_result
+      
+    - name: Deploy RabbitMQ
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl apply -f /home/ubuntu/medisupply/k8s/rabbitmq-deployment.yaml
+      args:
+        executable: /bin/bash
+      register: rabbitmq_result
+      
+    - name: Wait for RabbitMQ to be ready
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get pods -l app=rabbitmq --field-selector=status.phase=Running | wc -l
+      register: rabbitmq_ready
+      retries: 20
+      delay: 15
+      until: rabbitmq_ready.stdout|int >= 1
+      
+    - name: Wait for RabbitMQ initialization job to complete
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get jobs rabbitmq-init -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}'
+      register: rabbitmq_init_ready
+      retries: 10
+      delay: 10
+      until: rabbitmq_init_ready.stdout == "True"
+      
+    - name: Update microservice deployment images
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        # Update image references in deployment files
+        sed -i "s/your-dockerhub-username/{{ DOCKERHUB_USERNAME }}/g" /home/ubuntu/medisupply/k8s/supplier-service-deployment.yaml
+        sed -i "s/your-dockerhub-username/{{ DOCKERHUB_USERNAME }}/g" /home/ubuntu/medisupply/k8s/purchase-order-service-deployment.yaml
+      args:
+        executable: /bin/bash
+      register: image_update_result
+      
+    - name: Deploy Supplier Service
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl apply -f /home/ubuntu/medisupply/k8s/supplier-service-deployment.yaml
+      args:
+        executable: /bin/bash
+      register: supplier_result
+      
+    - name: Deploy Purchase Order Service
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl apply -f /home/ubuntu/medisupply/k8s/purchase-order-service-deployment.yaml
+      args:
+        executable: /bin/bash
+      register: purchase_order_result
+      
+    - name: Wait for microservices to be ready
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get pods -l app=supplier-service --field-selector=status.phase=Running | wc -l
+      register: supplier_ready
+      retries: 30
+      delay: 10
+      until: supplier_ready.stdout|int >= 2
+      
+    - name: Wait for purchase order service to be ready
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get pods -l app=purchase-order-service --field-selector=status.phase=Running | wc -l
+      register: purchase_order_ready
+      retries: 30
+      delay: 10
+      until: purchase_order_ready.stdout|int >= 2
+      
+    - name: Deploy Istio Gateway and VirtualService
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl apply -f /home/ubuntu/medisupply/k8s/istio-gateway.yaml
+      args:
+        executable: /bin/bash
+      register: istio_gateway_result
+      
+    - name: Get Istio Ingress Gateway IP
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get service istio-ingressgateway -n istio-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: ingress_ip
+      retries: 10
+      delay: 5
+      until: ingress_ip.stdout != ""
+      
+    - name: Get Istio Ingress Gateway NodePort (fallback)
+      environment:
+        KUBECONFIG: "{{ KUBECONFIG }}"
+      shell: |
+        kubectl get service istio-ingressgateway -n istio-system -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}'
+      register: ingress_nodeport
+      when: ingress_ip.stdout == ""
+      
+    - name: Display deployment information
+      debug:
+        msg: |
+          ========================================
+          Medisupply Microservices Deployment Complete!
+          ========================================
+          
+          Services deployed:
+          - DynamoDB Local: http://localhost:8000
+          - RabbitMQ Management: http://localhost:15672 (mediplus/mediplus123)
+          - Supplier Service: http://localhost:8080
+          - Purchase Order Service: http://localhost:8081
+          
+          External Access (via Istio):
+          {% if ingress_ip.stdout != "" %}
+          - Gateway IP: {{ ingress_ip.stdout }}
+          - Supplier API: http://{{ ingress_ip.stdout }}/api/v1/suppliers
+          - Order API: http://{{ ingress_ip.stdout }}/api/v1/orders
+          - External Events API: http://{{ ingress_ip.stdout }}/api/v1/external
+          {% else %}
+          - NodePort: {{ ingress_nodeport.stdout }}
+          - Supplier API: http://localhost:{{ ingress_nodeport.stdout }}/api/v1/suppliers
+          - Order API: http://localhost:{{ ingress_nodeport.stdout }}/api/v1/orders
+          - External Events API: http://localhost:{{ ingress_nodeport.stdout }}/api/v1/external
+          {% endif %}
+          
+          To test the services:
+          1. Check health: curl http://localhost:{{ ingress_nodeport.stdout if ingress_ip.stdout == "" else ingress_ip.stdout }}/health
+          2. List suppliers: curl http://localhost:{{ ingress_nodeport.stdout if ingress_ip.stdout == "" else ingress_ip.stdout }}/api/v1/suppliers
+          3. Create order: curl -X POST http://localhost:{{ ingress_nodeport.stdout if ingress_ip.stdout == "" else ingress_ip.stdout }}/api/v1/orders -H "Content-Type: application/json" -d '{"proveedor_id":"test","productos":[{"producto_id":"prod1","cantidad":10}],"motivo_generacion":"test"}'
+          4. Simulate external event: curl -X POST http://localhost:{{ ingress_nodeport.stdout if ingress_ip.stdout == "" else ingress_ip.stdout }}/api/v1/external/simulate/stock-bajo -H "Content-Type: application/json" -d '{"producto_id":"prod1","stock_actual":5,"stock_minimo":10}'
+          
+          Monitoring:
+          - kubectl get pods
+          - kubectl get services
+          - kubectl logs -l app=supplier-service
+          - kubectl logs -l app=purchase-order-service
+          ========================================

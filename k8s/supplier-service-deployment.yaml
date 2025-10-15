@@ -4,58 +4,91 @@ metadata:
   name: supplier-service
   labels:
     app: supplier-service
+    version: v1
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: supplier-service
+      version: v1
   template:
     metadata:
       labels:
         app: supplier-service
+        version: v1
+      annotations:
+        sidecar.istio.io/inject: "true"
     spec:
       containers:
       - name: supplier-service
-        image: mediplus/supplier-service:latest
+        image: edwinhc93/medisupply-supplier-service:latest
         ports:
         - containerPort: 8080
+          name: http
         env:
         - name: PORT
           value: "8080"
         - name: AWS_REGION
           value: "us-east-1"
-        - name: NATS_URL
-          value: "nats://nats-cluster:4222"
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: secret-access-key
+        - name: DYNAMODB_ENDPOINT
+          value: "http://dynamodb-local:8000"
+        - name: RABBITMQ_URL
+          value: "amqp://mediplus:mediplus123@rabbitmq:5672/"
         - name: ENVIRONMENT
           value: "production"
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "256Mi"
+            cpu: "200m"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "1Gi"
+            cpu: "1000m"
         livenessProbe:
           httpGet:
             path: /health
             port: 8080
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /health
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: supplier-service
+  labels:
+    app: supplier-service
 spec:
   selector:
     app: supplier-service
   ports:
   - port: 8080
     targetPort: 8080
+    name: http
   type: ClusterIP

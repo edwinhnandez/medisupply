@@ -1,0 +1,313 @@
+---
+- name: Instalar Istio en Minikube
+  hosts: minikube
+  become: yes
+  become_user: root
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    ISTIO_NAMESPACE: "istio-system"
+    kubectl_version: "v1.30.0"
+    minikube_version: "v1.34.0"
+    istio_version: "1.27.1"
+    istio_dir: "/home/ubuntu/istio-{{ istio_version }}"
+    istio_profile: "ambient"
+
+  tasks:
+    - name: Actualizar repositorios
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Instalar dependencias necesarias
+      ansible.builtin.apt:
+        name:
+          - curl
+          - apt-transport-https
+          - ca-certificates
+          - conntrack
+          - software-properties-common
+        state: present
+
+    - name: Detectar arquitectura del sistema
+      command: uname -m
+      register: arch_output
+
+    - name: Configurar variable de arquitectura para kubectl
+      set_fact:
+        arch_type: "{{ 'arm64' if 'aarch64' in arch_output.stdout else 'amd64' }}"
+
+    - name: Instalar kubectl
+      ansible.builtin.shell: |
+        set -e
+        ARCH={{ arch_type }}
+        KUBECTL_VERSION={{ kubectl_version }}
+        curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl"
+        install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      args:
+        chdir: /tmp
+
+    - name: Verificar que kubectl se instaló correctamente
+      ansible.builtin.command:
+        cmd: /usr/local/bin/kubectl version --client
+      register: kubectl_output
+      changed_when: false
+
+    - debug:
+        msg: "{{ kubectl_output.stdout_lines }}"
+
+    # ------------------------------------------------------
+    # Instalar Docker
+    # ------------------------------------------------------
+    - name: Instalar Docker
+      apt:
+        name:
+          - docker.io
+        state: present
+
+    - name: Habilitar e iniciar Docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Asegurar que Docker esté instalado
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Asegurar que Docker esté habilitado y corriendo
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Cambiar permisos del socket Docker
+      ansible.builtin.file:
+        path: /var/run/docker.sock
+        mode: '0666'
+        state: file
+
+    - name: Verificar acceso de ubuntu al socket Docker
+      become_user: ubuntu
+      command: docker ps
+      register: docker_access
+      changed_when: false
+
+    - debug:
+        msg: "{{ docker_access.stdout_lines }}"
+
+    # ------------------------------------------------------
+    # Dar permisos Docker al usuario 'ubuntu'
+    # ------------------------------------------------------
+    - name: Agregar usuario ubuntu al grupo docker
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+
+    # ------------------------------------------------------
+    # Instalar Minikube
+    # ------------------------------------------------------
+    - name: Instalar Minikube
+      ansible.builtin.shell: |
+        set -e
+        ARCH={{ arch_type }}
+        VERSION={{ minikube_version }}
+        curl -Lo minikube https://storage.googleapis.com/minikube/releases/${VERSION}/minikube-linux-${ARCH}
+        install minikube /usr/local/bin/minikube
+      args:
+        chdir: /tmp
+
+    - name: Verificar Minikube
+      command: minikube version
+      register: minikube_output
+      changed_when: false
+
+    - name: Iniciar Minikube
+      become_user: ubuntu
+      environment:
+        CHANGE_MINIKUBE_NONE_USER: "true"
+        DOCKER_HOST: "unix:///var/run/docker.sock"
+      command: minikube start --driver=docker --force
+      register: minikube_start
+      retries: 3
+      delay: 20
+      until: minikube_start.rc == 0
+
+    - debug:
+        msg: "{{ minikube_output.stdout_lines }}"
+
+    # ------------------------------------------------------
+    # Iniciar Minikube
+    # ------------------------------------------------------
+    - name: Iniciar Minikube
+      become: yes
+      become_user: ubuntu
+      environment:
+        CHANGE_MINIKUBE_NONE_USER: "true"
+        DOCKER_HOST: "unix:///var/run/docker.sock"
+      command: minikube start --driver=docker --base-image=gcr.io/k8s-minikube/kicbase:v0.0.42-arm64
+      register: minikube_start
+      args:
+        chdir: /home/ubuntu
+
+    - debug:
+        msg: "{{ minikube_start.stdout_lines }}"
+
+    - name: Descargar Istio
+      shell: |
+        curl -L https://istio.io/downloadIstio | ISTIO_VERSION={{ istio_version }} sh -
+      args:
+        chdir: /home/ubuntu
+        creates: "{{ istio_dir }}"
+
+    - name: Agregar istioctl al PATH
+      lineinfile:
+        path: /home/ubuntu/.bashrc
+        regexp: 'istio-{{ istio_version }}/bin'
+        line: 'export PATH=$PATH:{{ istio_dir }}/bin'
+        insertafter: EOF
+
+    - name: Aplicar variable PATH en la sesión actual
+      shell: "export PATH=$PATH:{{ istio_dir }}/bin"
+
+    - name: Esperar a que el clúster de Kubernetes esté disponible
+      become: yes
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      command: kubectl get nodes
+      register: k8s_ready
+      retries: 15
+      delay: 10
+      until: k8s_ready.rc == 0
+
+    - name: Dar permisos de ejecución a istioctl
+      become: yes
+      file:
+        path: /home/ubuntu/istio-{{ istio_version }}/bin/istioctl
+        mode: '0755'
+
+    - name: Instalar Istio ambient profile
+      become: yes
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      command: /home/ubuntu/istio-{{ istio_version }}/bin/istioctl install --set profile={{ istio_profile }} -y
+      register: istio_install
+      retries: 3
+      delay: 10
+      until: istio_install.rc == 0
+
+    - block:
+
+        - name: Verificar si Helm está instalado
+          become: yes
+          become_user: ubuntu
+          environment:
+            PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin"
+          command: which helm
+          register: helm_check
+          ignore_errors: yes
+
+        - name: Instalar Helm si no existe
+          become: yes
+          shell: |
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          when: helm_check.rc != 0
+
+        - name: Agregar repositorio Istio a Helm si no existe
+          become: yes
+          become_user: ubuntu
+          environment:
+            PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin"
+            KUBECONFIG: /home/ubuntu/.kube/config
+          shell: |
+            helm repo add istio https://istio-release.storage.googleapis.com/charts
+            helm repo update
+          args:
+            executable: /bin/bash
+
+        - name: Crear namespace istio-ingress si no existe
+          shell: |
+            kubectl get ns istio-ingress >/dev/null 2>&1 || kubectl create namespace istio-ingress
+          args:
+            executable: /bin/bash
+
+        - name: Instalar Istio Gateway con Helm (idempotente)
+          shell: |
+            helm status istio-ingress -n istio-ingress >/dev/null 2>&1 || \
+            helm install istio-ingress istio/gateway -n istio-ingress --timeout 10m
+          args:
+            executable: /bin/bash
+          ignore_errors: true
+      become: yes
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+
+
+    - name: Verificar que Istio esté desplegado
+      become: yes
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      command: kubectl get pods -n {{ ISTIO_NAMESPACE }}
+      register: istio_pods
+      retries: 10
+      delay: 10
+      until: istio_pods.rc == 0
+      ignore_errors: false
+
+    - name: Instalar CRDs de Kubernetes Gateway API si no existen
+      become: yes
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      shell: |
+        if ! kubectl get crd gateways.gateway.networking.k8s.io &>/dev/null; then
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yam>        else
+          echo "CRDs de Gateway API ya existen."
+        fi
+      register: gateway_crd_install
+      failed_when: >
+        gateway_crd_install.rc != 0 and
+        ('AlreadyExists' not in gateway_crd_install.stderr)
+      changed_when: "'created' in gateway_crd_install.stdout or 'configured' in gateway_crd_install.stdout"
+
+    - name: Instalar o actualizar Istio con soporte Gateway API
+      become: yes
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      when: istio_pods.rc != 0
+      command: >
+        /home/ubuntu/istio-{{ istio_version }}/bin/istioctl install
+        --set values.pilot.env.PILOT_ENABLE_GATEWAY_API=true
+        --set components.ingressGateways[0].enabled=true
+        --set profile=ambient
+        -y
+
+
+    # -------------------------------------------------------------
+    # PROMETHEUS
+    # -------------------------------------------------------------
+    - name: Instalar Prometheus
+      become: yes
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      shell: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+        helm repo update
+        if helm status prometheus -n istio-system > /dev/null 2>&1; then
+          helm upgrade prometheus prometheus-community/prometheus --namespace "istio-system"
+        else
+          helm install prometheus prometheus-community/prometheus --namespace "istio-system"
+        fi
+      args:
+        executable: /bin/bash
+      register: prometheus_install
+      retries: 3
+      delay: 10
+      until: prometheus_install.rc == 0
