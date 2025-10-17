@@ -20,7 +20,7 @@ const (
 	TopicNotifications   = "notifications.events"
 	TopicStockEvents     = "stock.events"
 	TopicOrderEvents     = "order.events"
-	TopicExternalEvents  = "external.events"
+	//TopicExternalEvents  = "external.events"
 )
 
 // Eventos del dominio

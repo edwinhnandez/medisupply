@@ -81,12 +81,12 @@ func (h *ExternalSimulatorHandler) SimulateStockBajoExterno(c *gin.Context) {
 	}
 
 	// Publicar evento
-	err := h.eventBus.Publish(events.TopicExternalEvents, &event)
+	/*err := h.eventBus.Publish(events.TopicExternalEvents, &event)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to publish stock bajo externo event")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish event"})
 		return
-	}
+	}*/
 
 	h.log.WithFields(logrus.Fields{
 		"producto_id":        request.ProductoID,
@@ -158,12 +158,12 @@ func (h *ExternalSimulatorHandler) SimulateDemandaAltaExterna(c *gin.Context) {
 	}
 
 	// Publicar evento
-	err := h.eventBus.Publish(events.TopicExternalEvents, &event)
+	/*err := h.eventBus.Publish(events.TopicExternalEvents, &event)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to publish demanda alta externa event")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish event"})
 		return
-	}
+	}*/
 
 	h.log.WithFields(logrus.Fields{
 		"producto_id":          request.ProductoID,
@@ -232,12 +232,12 @@ func (h *ExternalSimulatorHandler) SimulateLoteDanadoExterno(c *gin.Context) {
 	}
 
 	// Publicar evento
-	err := h.eventBus.Publish(events.TopicExternalEvents, &event)
+	/*err := h.eventBus.Publish(events.TopicExternalEvents, &event)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to publish lote danado externo event")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish event"})
 		return
-	}
+	}*/
 
 	h.log.WithFields(logrus.Fields{
 		"producto_id":     request.ProductoID,
@@ -310,12 +310,12 @@ func (h *ExternalSimulatorHandler) SimulateAlertaInventarioExterna(c *gin.Contex
 	}
 
 	// Publicar evento
-	err := h.eventBus.Publish(events.TopicExternalEvents, &event)
+	/*err := h.eventBus.Publish(events.TopicExternalEvents, &event)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to publish alerta inventario externa event")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish event"})
 		return
-	}
+	}*/
 
 	h.log.WithFields(logrus.Fields{
 		"producto_id":        request.ProductoID,
