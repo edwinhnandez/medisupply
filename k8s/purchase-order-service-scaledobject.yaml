@@ -9,12 +9,11 @@ spec:
   minReplicaCount: 1
   maxReplicaCount: 15
   triggers:
-  - type: nats
+  - type: rabbitmq
     metadata:
-      natsServerMonitoringEndpoint: "nats://nats-cluster:8222"
-      queueGroup: "order.events"
-      queueSubject: "order.events"
-      lagThreshold: "3"
+      host: "amqp://mediplus:mediplus123@rabbitmq-cluster:5672/"
+      queueName: "order.events"
+      queueLength: "3"
   - type: prometheus
     metadata:
       serverAddress: "http://prometheus:9090"

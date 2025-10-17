@@ -6,21 +6,23 @@ Sistema de microservicios para la gestión de aprovisionamiento médico basado e
 
 El sistema está compuesto por dos microservicios principales:
 
-### 1. Supplier Management Service (Puerto 8080)
+### 1. Supplier Management Service (Puerto 8082)
 - **Responsabilidad**: Gestión de proveedores calificados, certificaciones y evaluaciones
 - **Agregado Principal**: ProveedorCalificado
 - **Eventos**: ProveedorCalificado, ProveedorSuspendido, CertificacionPorVencer, EvaluacionActualizada
+- **Event Listeners**: Escucha eventos de órdenes de compra y genera solicitudes de proveedor automáticamente
 
 ### 2. Purchase Order Service (Puerto 8081)
 - **Responsabilidad**: Gestión de órdenes de compra automáticas
 - **Agregado Principal**: OrdenCompraAutomatica
 - **Eventos**: OrdenCompraGenerada, OrdenCompraEnviada, OrdenCompraConfirmada, OrdenCompraRecibida
+- **Event Listeners**: Escucha eventos de stock bajo y genera órdenes automáticamente
 
 ## Tecnologías Utilizadas
 
 - **Lenguaje**: Go 1.21
 - **Base de Datos**: Amazon DynamoDB
-- **Event Mesh**: NATS
+- **Event Mesh**: RabbitMQ
 - **Orquestación**: Kubernetes
 - **Escalado Automático**: KEDA
 - **Contenedores**: Docker
@@ -57,7 +59,7 @@ mediplus/
 │   ├── purchase-order-service-deployment.yaml
 │   ├── supplier-service-scaledobject.yaml
 │   ├── purchase-order-service-scaledobject.yaml
-│   ├── nats-cluster.yaml
+│   ├── rabbitmq-cluster.yaml
 │   ├── dynamodb-local.yaml
 │   └── dynamodb-tables.yaml
 ├── docker-compose.yml          # Desarrollo local
@@ -66,7 +68,7 @@ mediplus/
 
 ## Event Mesh
 
-El sistema utiliza NATS como event mesh para la comunicación entre microservicios:
+El sistema utiliza RabbitMQ como event mesh para la comunicación entre microservicios:
 
 ### Topics de Eventos
 - `supplier.events`: Eventos relacionados con proveedores
@@ -82,6 +84,7 @@ El sistema utiliza NATS como event mesh para la comunicación entre microservici
 - `proveedor.activado`: Proveedor activado
 - `certificacion.por_vencer`: Certificación por vencer
 - `evaluacion.actualizada`: Evaluación actualizada
+- `solicitud.proveedor`: Solicitud de proveedor generada automáticamente
 
 #### Purchase Order Service
 - `orden_compra.generada`: Orden de compra generada
@@ -97,7 +100,7 @@ El sistema utiliza NATS como event mesh para la comunicación entre microservici
 El sistema utiliza KEDA para el escalado automático basado en:
 
 ### Métricas de Escalado
-- **NATS Queue Length**: Número de mensajes pendientes en colas
+- **RabbitMQ Queue Length**: Número de mensajes pendientes en colas
 - **CPU Utilization**: Uso de CPU del pod
 - **Memory Utilization**: Uso de memoria del pod
 - **Prometheus Metrics**: Métricas personalizadas
@@ -156,13 +159,13 @@ docker-compose up -d
 3. **Verificar servicios**
 ```bash
 # Health checks
-curl http://localhost:8080/health  # Supplier Service
+curl http://localhost:8082/health  # Supplier Service
 curl http://localhost:8081/health  # Purchase Order Service
 ```
 
 ### APIs Disponibles
 
-#### Supplier Service (Puerto 8080)
+#### Supplier Service (Puerto 8082)
 - `GET /api/v1/suppliers` - Listar proveedores
 - `POST /api/v1/suppliers` - Crear proveedor
 - `GET /api/v1/suppliers/:id` - Obtener proveedor
@@ -171,6 +174,11 @@ curl http://localhost:8081/health  # Purchase Order Service
 - `POST /api/v1/suppliers/:id/evaluate` - Evaluar proveedor
 - `POST /api/v1/suppliers/:id/suspend` - Suspender proveedor
 - `POST /api/v1/suppliers/:id/activate` - Activar proveedor
+
+**Event Listeners:**
+- Escucha `orden.generada` → Genera `solicitud.proveedor`
+- Escucha `orden.confirmada` → Registra confirmación en auditoría
+- Escucha `orden.recibida` → Registra recepción en auditoría
 
 #### Purchase Order Service (Puerto 8081)
 - `GET /api/v1/orders` - Listar órdenes
@@ -187,13 +195,13 @@ curl http://localhost:8081/health  # Purchase Order Service
 ### Prerrequisitos
 - Kubernetes cluster
 - KEDA instalado
-- NATS cluster configurado
+- RabbitMQ cluster configurado
 
 ### Desplegar el Sistema
 
 1. **Aplicar configuraciones**
 ```bash
-kubectl apply -f k8s/nats-cluster.yaml
+kubectl apply -f k8s/rabbitmq-cluster.yaml
 kubectl apply -f k8s/dynamodb-local.yaml
 kubectl apply -f k8s/dynamodb-tables.yaml
 kubectl apply -f k8s/supplier-service-deployment.yaml
@@ -211,7 +219,7 @@ kubectl get scaledobjects
 ## Monitoreo y Observabilidad
 
 ### Métricas de KEDA
-- Queue length de NATS
+- Queue length de RabbitMQ
 - CPU y memoria de pods
 - Métricas personalizadas de Prometheus
 
@@ -228,20 +236,54 @@ kubectl get scaledobjects
 
 ### Flujo de Eventos Típico
 
-1. **Stock Bajo** → `stock.bajo` event → Auto-generación de orden
-2. **Lote Dañado** → `lote.danado` event → Auto-generación de orden
-3. **Pronóstico Alta Demanda** → `pronostico.demanda_alta` event → Auto-generación de orden
+1. **Stock Bajo** → `stock.bajo` event → **Purchase Order Service escucha** → Auto-generación de orden
+2. **Lote Dañado** → `lote.danado` event → **Purchase Order Service escucha** → Auto-generación de orden
+3. **Pronóstico Alta Demanda** → `pronostico.demanda_alta` event → **Purchase Order Service escucha** → Auto-generación de orden
 4. **Orden Generada** → `orden_compra.generada` event → Notificaciones
 5. **Orden Enviada** → `orden_compra.enviada` event → Seguimiento
 6. **Orden Confirmada** → `orden_compra.confirmada` event → Actualización de estado
 7. **Orden Recibida** → `orden_compra.recibida` event → Finalización del proceso
+
+### Event-Driven Order Generation
+
+El **Purchase Order Service** ahora escucha automáticamente los siguientes eventos y genera órdenes de compra:
+
+- **`stock.bajo`**: Cuando el stock de un producto está por debajo del punto de reorden
+- **`stock.lote_danado`**: Cuando se detecta un lote dañado por temperatura
+- **`stock.demanda_alta`**: Cuando se pronostica alta demanda para un producto
+
+#### Lógica de Generación Automática:
+- **Prioridad Inteligente**: 
+  - Stock = 0 → Prioridad CRÍTICA
+  - Stock ≤ PuntoReorden/2 → Prioridad ALTA
+  - Stock ≤ PuntoReorden → Prioridad MEDIA
+- **Cantidad Calculada**: Hasta el stock máximo del producto
+- **Prevención de Duplicados**: Verifica que no exista una orden pendiente para el mismo producto
+
+### Event-Driven Supplier Requests
+
+El **Supplier Service** ahora escucha automáticamente los siguientes eventos de órdenes y genera solicitudes de proveedor:
+
+- **`orden.generada`**: Cuando se crea una nueva orden de compra
+- **`orden.confirmada`**: Cuando un proveedor confirma una orden
+- **`orden.recibida`**: Cuando se recibe la entrega de una orden
+
+#### Lógica de Solicitud de Proveedor:
+- **Requisitos Especiales**: Basados en la prioridad de la orden
+  - `CRITICA`: Entrega urgente, respuesta 24/7, certificaciones médicas vigentes
+  - `ALTA`: Entrega rápida, certificaciones médicas vigentes
+  - `MEDIA`: Certificaciones médicas vigentes
+  - `BAJA`: Certificaciones básicas
+- **Productos Requeridos**: Información detallada de productos y cantidades
+- **Auditoría**: Trazabilidad completa de eventos de órdenes
+- **Evento Generado**: `solicitud.proveedor` con todos los requisitos
 
 ## Consideraciones de Escalabilidad
 
 ### Escalado Horizontal
 - KEDA maneja el escalado automático basado en métricas
 - Cada microservicio puede escalar independientemente
-- NATS distribuye la carga entre instancias
+- RabbitMQ distribuye la carga entre instancias
 
 ### Escalado Vertical
 - Límites de CPU y memoria configurados
@@ -249,7 +291,7 @@ kubectl get scaledobjects
 
 ### Persistencia
 - DynamoDB como base de datos principal
-- Eventos persistentes en NATS JetStream
+- Eventos persistentes en RabbitMQ
 - Backup y recuperación automatizados
 
 ## Seguridad

@@ -261,27 +261,25 @@ func (s *orderService) ProcessStockLowEvent(productoID string) error {
 		return nil
 	}
 
-	// Emitir evento de stock bajo
-	event := &events.StockBajoEvent{
-		EventID:    uuid.New().String(),
-		EventType:  events.EventTypeStockBajo,
-		ProductoID: productoID,
-		Timestamp:  time.Now(),
-	}
-
-	event.Data.NombreProducto = producto.Nombre
-	event.Data.StockActual = producto.StockActual
-	event.Data.PuntoReorden = producto.PuntoReorden
-	event.Data.StockMaximo = producto.StockMaximo
-	event.Data.CantidadRequerida = producto.StockMaximo - producto.StockActual
-
-	err = s.eventBus.Publish(events.TopicStockEvents, event)
+	// Verificar si ya existe una orden pendiente para este producto
+	ordenesPendientes, err := s.orderRepo.ListByEstado(models.EstadoGenerada)
 	if err != nil {
-		s.log.Errorf("Error publishing stock low event: %v", err)
+		s.log.Errorf("Error getting pending orders: %v", err)
+		return err
 	}
 
-	// Auto-generar orden si es necesario
-	return s.AutoGenerateOrder("Stock bajo punto reorden")
+	// Verificar si ya hay una orden pendiente para este producto
+	for _, orden := range ordenesPendientes {
+		for _, item := range orden.Items {
+			if item.ProductoID == productoID {
+				s.log.Infof("Order already exists for product %s: %s", productoID, orden.OrdenID)
+				return nil
+			}
+		}
+	}
+
+	// Crear orden automáticamente para el producto con stock bajo
+	return s.createOrderForLowStockProduct(producto)
 }
 
 // ProcessLoteDanadoEvent procesa un evento de lote dañado
@@ -377,4 +375,64 @@ func (s *orderService) ListOrdersByEstado(estado models.EstadoOrden) ([]*models.
 // ListOrdersByProveedor lista órdenes por proveedor
 func (s *orderService) ListOrdersByProveedor(proveedorID string) ([]*models.OrdenCompra, error) {
 	return s.orderRepo.ListByProveedor(proveedorID)
+}
+
+// createOrderForLowStockProduct crea una orden automáticamente para un producto con stock bajo
+func (s *orderService) createOrderForLowStockProduct(producto *models.Producto) error {
+	s.log.Infof("Creating automatic order for low stock product: %s", producto.ProductoID)
+
+	// Calcular cantidad a solicitar (hasta el stock máximo)
+	cantidadRequerida := producto.StockMaximo - producto.StockActual
+
+	if cantidadRequerida <= 0 {
+		s.log.Infof("No reorder needed for product %s (stock already at maximum)", producto.ProductoID)
+		return nil
+	}
+
+	// Determinar prioridad basada en el nivel de stock
+	var prioridad models.Prioridad
+	if producto.StockActual == 0 {
+		prioridad = models.PrioridadCritica
+	} else if producto.StockActual <= producto.PuntoReorden/2 {
+		prioridad = models.PrioridadAlta
+	} else {
+		prioridad = models.PrioridadMedia
+	}
+
+	// Crear orden
+	orden := models.NewOrdenCompra("", "Stock bajo punto reorden", prioridad)
+	orden.MotivoGeneracion = "Stock bajo punto reorden - Generación automática"
+
+	// Agregar item a la orden
+	precioUnitario := 100.0 // Precio por defecto - en un escenario real se obtendría del catálogo
+	temperaturaRequerida := 0.0
+	if producto.Condiciones != nil {
+		temperaturaRequerida = producto.Condiciones.TemperaturaMinima
+	}
+
+	item := models.NewItemOrdenCompra(
+		producto.ProductoID,
+		cantidadRequerida,
+		precioUnitario,
+		temperaturaRequerida,
+	)
+	orden.AddItem(item)
+
+	// Crear la orden
+	err := s.CreateOrder(orden)
+	if err != nil {
+		s.log.Errorf("Error creating automatic order for low stock product: %v", err)
+		return err
+	}
+
+	s.log.WithFields(logrus.Fields{
+		"orden_id":      orden.OrdenID,
+		"producto_id":   producto.ProductoID,
+		"cantidad":      cantidadRequerida,
+		"prioridad":     prioridad,
+		"stock_actual":  producto.StockActual,
+		"punto_reorden": producto.PuntoReorden,
+	}).Info("Successfully created automatic order for low stock product")
+
+	return nil
 }

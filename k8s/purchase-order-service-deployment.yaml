@@ -24,8 +24,8 @@ spec:
           value: "8081"
         - name: AWS_REGION
           value: "us-east-1"
-        - name: NATS_URL
-          value: "nats://nats-cluster:4222"
+        - name: RABBITMQ_URL
+          value: "amqp://mediplus:mediplus123@rabbitmq-cluster:5672/"
         - name: SUPPLIER_SERVICE_URL
           value: "http://supplier-service:8080"
         - name: ENVIRONMENT

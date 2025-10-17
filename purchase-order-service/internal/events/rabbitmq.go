@@ -58,12 +58,15 @@ func NewRabbitMQEventBus(rabbitmqURL string, log *logrus.Logger) (*RabbitMQEvent
 
 	// Declarar colas principales
 	queues := map[string]string{
-		"proveedor.events":     TopicProveedorEvents,
-		"notifications":        TopicNotifications,
-		"stock.events":         TopicStockEvents,
-		"order.events":         TopicOrderEvents,
-		"proveedor.audit":      TopicProveedorEvents,
-		"proveedor.evaluation": TopicProveedorEvents,
+		"proveedor.events":            TopicProveedorEvents,
+		"notifications":               TopicNotifications,
+		"stock.events":                TopicStockEvents,
+		"order.events":                TopicOrderEvents,
+		"proveedor.audit":             TopicProveedorEvents,
+		"proveedor.evaluation":        TopicProveedorEvents,
+		"purchase-order-stock-bajo":   TopicStockEvents,
+		"purchase-order-lote-danado":  TopicStockEvents,
+		"purchase-order-demanda-alta": TopicStockEvents,
 	}
 
 	for queueName, exchange := range queues {

@@ -1,0 +1,348 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+data:
+  enabled_plugins: |
+    [rabbitmq_management,rabbitmq_prometheus].
+  rabbitmq.conf: |
+    # RabbitMQ Server Configuration
+    listeners.tcp.default = 5672
+    management.tcp.port = 15672
+    prometheus.tcp.port = 15692
+    
+    # Cluster configuration
+    cluster_formation.peer_discovery_backend = rabbit_peer_discovery_k8s
+    cluster_formation.k8s.host = kubernetes.default.svc.cluster.local
+    cluster_formation.k8s.address_type = hostname
+    cluster_formation.k8s.hostname_suffix = .rabbitmq-cluster.default.svc.cluster.local
+    cluster_formation.k8s.service_name = rabbitmq-cluster
+    cluster_formation.k8s.port = 5672
+    
+    # Memory and disk limits
+    vm_memory_high_watermark.relative = 0.6
+    disk_free_limit.relative = 2.0
+    
+    # Logging
+    log.console = true
+    log.console.level = info
+    log.file = /var/log/rabbitmq/rabbit.log
+    log.file.level = info
+    
+    # Default user (for development)
+    default_user = mediplus
+    default_pass = mediplus123
+    default_vhost = /
+    
+    # Management plugin
+    management.tcp.port = 15672
+    management.load_definitions = /etc/rabbitmq/definitions.json
+    
+    # Prometheus monitoring
+    prometheus.tcp.port = 15692
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-definitions
+data:
+  definitions.json: |
+    {
+      "users": [
+        {
+          "name": "mediplus",
+          "password_hash": "mediplus123",
+          "hashing_algorithm": "rabbit_password_hashing_sha256",
+          "tags": "administrator"
+        }
+      ],
+      "vhosts": [
+        {
+          "name": "/"
+        }
+      ],
+      "permissions": [
+        {
+          "user": "mediplus",
+          "vhost": "/",
+          "configure": ".*",
+          "write": ".*",
+          "read": ".*"
+        }
+      ],
+      "exchanges": [
+        {
+          "name": "supplier.events",
+          "vhost": "/",
+          "type": "topic",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "order.events",
+          "vhost": "/",
+          "type": "topic",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "notifications.events",
+          "vhost": "/",
+          "type": "topic",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "stock.events",
+          "vhost": "/",
+          "type": "topic",
+          "durable": true,
+          "auto_delete": false
+        }
+      ],
+      "queues": [
+        {
+          "name": "supplier.events",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "order.events",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "notifications.events",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "stock.events",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "purchase-order-stock-bajo",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "purchase-order-lote-danado",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "purchase-order-demanda-alta",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "supplier-order-generated",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "supplier-order-confirmed",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        },
+        {
+          "name": "supplier-order-received",
+          "vhost": "/",
+          "durable": true,
+          "auto_delete": false
+        }
+      ],
+      "bindings": [
+        {
+          "source": "supplier.events",
+          "vhost": "/",
+          "destination": "supplier.events",
+          "destination_type": "queue",
+          "routing_key": "#"
+        },
+        {
+          "source": "order.events",
+          "vhost": "/",
+          "destination": "order.events",
+          "destination_type": "queue",
+          "routing_key": "#"
+        },
+        {
+          "source": "notifications.events",
+          "vhost": "/",
+          "destination": "notifications.events",
+          "destination_type": "queue",
+          "routing_key": "#"
+        },
+        {
+          "source": "stock.events",
+          "vhost": "/",
+          "destination": "stock.events",
+          "destination_type": "queue",
+          "routing_key": "#"
+        },
+        {
+          "source": "stock.events",
+          "vhost": "/",
+          "destination": "purchase-order-stock-bajo",
+          "destination_type": "queue",
+          "routing_key": "stock.bajo"
+        },
+        {
+          "source": "stock.events",
+          "vhost": "/",
+          "destination": "purchase-order-lote-danado",
+          "destination_type": "queue",
+          "routing_key": "stock.lote_danado"
+        },
+        {
+          "source": "stock.events",
+          "vhost": "/",
+          "destination": "purchase-order-demanda-alta",
+          "destination_type": "queue",
+          "routing_key": "stock.demanda_alta"
+        },
+        {
+          "source": "order.events",
+          "vhost": "/",
+          "destination": "supplier-order-generated",
+          "destination_type": "queue",
+          "routing_key": "orden.generada"
+        },
+        {
+          "source": "order.events",
+          "vhost": "/",
+          "destination": "supplier-order-confirmed",
+          "destination_type": "queue",
+          "routing_key": "orden.confirmada"
+        },
+        {
+          "source": "order.events",
+          "vhost": "/",
+          "destination": "supplier-order-received",
+          "destination_type": "queue",
+          "routing_key": "orden.recibida"
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq-cluster
+spec:
+  serviceName: rabbitmq-cluster
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq-cluster
+  template:
+    metadata:
+      labels:
+        app: rabbitmq-cluster
+    spec:
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3.12-management-alpine
+        ports:
+        - containerPort: 5672
+          name: amqp
+        - containerPort: 15672
+          name: management
+        - containerPort: 15692
+          name: prometheus
+        env:
+        - name: RABBITMQ_ERLANG_COOKIE
+          value: "SWQOKODSQALRPCLNMEQG"
+        - name: RABBITMQ_DEFAULT_USER
+          value: "mediplus"
+        - name: RABBITMQ_DEFAULT_PASS
+          value: "mediplus123"
+        - name: RABBITMQ_DEFAULT_VHOST
+          value: "/"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/rabbitmq
+        - name: definitions
+          mountPath: /etc/rabbitmq/definitions.json
+          subPath: definitions.json
+        - name: data
+          mountPath: /var/lib/rabbitmq
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - check_port_connectivity
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: rabbitmq-config
+      - name: definitions
+        configMap:
+          name: rabbitmq-definitions
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-cluster
+spec:
+  selector:
+    app: rabbitmq-cluster
+  ports:
+  - name: amqp
+    port: 5672
+    targetPort: 5672
+  - name: management
+    port: 15672
+    targetPort: 15672
+  - name: prometheus
+    port: 15692
+    targetPort: 15692
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-cluster-headless
+spec:
+  clusterIP: None
+  selector:
+    app: rabbitmq-cluster
+  ports:
+  - name: amqp
+    port: 5672
+    targetPort: 5672
+  - name: management
+    port: 15672
+    targetPort: 15672
+  - name: prometheus
+    port: 15692
+    targetPort: 15692
