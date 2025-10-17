@@ -1,0 +1,186 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: medisupply-gateway
+  namespace: default
+spec:
+  selector:
+    istio: ingressgateway # Use the default Istio ingress gateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"  # Allow all hosts - configure specific domains in production
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: medisupply-tls-secret  # TLS certificate secret
+    hosts:
+    - "*"  # Allow all hosts - configure specific domains in production
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: medisupply-vs
+  namespace: default
+spec:
+  hosts:
+  - "*"  # Match all hosts
+  gateways:
+  - medisupply-gateway
+  http:
+  # Supplier Service routes
+  - match:
+    - uri:
+        prefix: /api/v1/suppliers
+    - uri:
+        prefix: /health
+    route:
+    - destination:
+        host: supplier-service
+        port:
+          number: 8080
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+    fault:
+      delay:
+        percentage:
+          value: 0.1  # 0.1% chance of delay for testing
+        fixedDelay: 5s
+  # Purchase Order Service routes
+  - match:
+    - uri:
+        prefix: /api/v1/orders
+    - uri:
+        prefix: /api/v1/external
+    route:
+    - destination:
+        host: purchase-order-service
+        port:
+          number: 8081
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+    fault:
+      delay:
+        percentage:
+          value: 0.1  # 0.1% chance of delay for testing
+        fixedDelay: 5s
+  # Default route - redirect to supplier service
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: supplier-service
+        port:
+          number: 8080
+    timeout: 30s
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: supplier-service-dr
+  namespace: default
+spec:
+  host: supplier-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 10
+      http:
+        http1MaxPendingRequests: 10
+        maxRequestsPerConnection: 2
+    circuitBreaker:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: purchase-order-service-dr
+  namespace: default
+spec:
+  host: purchase-order-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 10
+      http:
+        http1MaxPendingRequests: 10
+        maxRequestsPerConnection: 2
+    circuitBreaker:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: medisupply-authz
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: supplier-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/default/sa/supplier-service"]
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        paths: ["/api/v1/suppliers/*"]
+  - from:
+    - source:
+        principals: ["cluster.local/ns/default/sa/purchase-order-service"]
+    to:
+    - operation:
+        methods: ["GET"]
+        paths: ["/api/v1/suppliers/*"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: purchase-order-authz
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: purchase-order-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/default/sa/purchase-order-service"]
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        paths: ["/api/v1/orders/*"]
+  - from:
+    - source:
+        principals: ["cluster.local/ns/default/sa/supplier-service"]
+    to:
+    - operation:
+        methods: ["GET"]
+        paths: ["/api/v1/orders/*"]

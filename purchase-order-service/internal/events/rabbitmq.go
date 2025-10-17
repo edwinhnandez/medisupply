@@ -259,6 +259,14 @@ func (r *RabbitMQEventBus) getRoutingKey(event interface{}) string {
 		return "stock.lote_danado"
 	case *PronosticoDemandaAltaEvent:
 		return "stock.demanda_alta"
+	case *StockBajoExternoEvent:
+		return "external.stock.bajo"
+	case *DemandaAltaExternaEvent:
+		return "external.demanda.alta"
+	case *LoteDanadoExternoEvent:
+		return "external.lote.danado"
+	case *AlertaInventarioExternaEvent:
+		return "external.alerta.inventario"
 	default:
 		return "unknown"
 	}
@@ -287,6 +295,14 @@ func (r *RabbitMQEventBus) getEventType(event interface{}) string {
 		return "LoteDanado"
 	case *PronosticoDemandaAltaEvent:
 		return "PronosticoDemandaAlta"
+	case *StockBajoExternoEvent:
+		return "StockBajoExterno"
+	case *DemandaAltaExternaEvent:
+		return "DemandaAltaExterna"
+	case *LoteDanadoExternoEvent:
+		return "LoteDanadoExterno"
+	case *AlertaInventarioExternaEvent:
+		return "AlertaInventarioExterna"
 	default:
 		return "Unknown"
 	}

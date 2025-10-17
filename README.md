@@ -1,4 +1,4 @@
-# MediPlus - Sistema de Gestión de Aprovisionamiento
+# MediSupply - Sistema de Gestión de Aprovisionamiento
 
 Sistema de microservicios para la gestión de aprovisionamiento médico basado en Domain-Driven Design (DDD) con event mesh y escalado automático mediante KEDA.
 
@@ -13,14 +13,15 @@ El sistema está compuesto por dos microservicios principales:
 - **Event Listeners**: Escucha eventos de órdenes de compra y genera solicitudes de proveedor automáticamente
 
 ### 2. Purchase Order Service (Puerto 8081)
-- **Responsabilidad**: Gestión de órdenes de compra automáticas
+- **Responsabilidad**: Gestión de órdenes de compra automáticas y procesamiento de eventos externos
 - **Agregado Principal**: OrdenCompraAutomatica
 - **Eventos**: OrdenCompraGenerada, OrdenCompraEnviada, OrdenCompraConfirmada, OrdenCompraRecibida
+
 - **Event Listeners**: Escucha eventos de stock bajo y genera órdenes automáticamente
 
 ## Tecnologías Utilizadas
 
-- **Lenguaje**: Go 1.21
+- **Lenguaje**: Go 1.23
 - **Base de Datos**: Amazon DynamoDB
 - **Event Mesh**: RabbitMQ
 - **Orquestación**: Kubernetes
@@ -31,7 +32,7 @@ El sistema está compuesto por dos microservicios principales:
 ## Estructura del Proyecto
 
 ```
-mediplus/
+medisupply/
 ├── supplier-service/           # Microservicio de proveedores
 │   ├── main.go
 │   ├── Dockerfile
@@ -39,6 +40,8 @@ mediplus/
 │       ├── config/
 │       ├── database/
 │       ├── events/
+│       │   ├── events.go
+│       │   └── rabbitmq.go
 │       ├── handlers/
 │       ├── models/
 │       ├── repository/
@@ -50,7 +53,12 @@ mediplus/
 │       ├── config/
 │       ├── database/
 │       ├── events/
+│       │   ├── events.go
+│       │   └── rabbitmq.go
 │       ├── handlers/
+│       │   ├── order_handler.go
+│       │   ├── external_event_handler.go
+│       │   └── external_simulator_handler.go
 │       ├── models/
 │       ├── repository/
 │       └── service/
@@ -62,19 +70,23 @@ mediplus/
 │   ├── rabbitmq-cluster.yaml
 │   ├── dynamodb-local.yaml
 │   └── dynamodb-tables.yaml
+├── scripts/                   # Scripts de inicialización
+│   ├── init-rabbitmq.sh
+│   └── create-tables.sh
 ├── docker-compose.yml          # Desarrollo local
 └── go.mod
 ```
 
-## Event Mesh
+## Event Mesh con RabbitMQ
 
 El sistema utiliza RabbitMQ como event mesh para la comunicación entre microservicios:
 
-### Topics de Eventos
+### Exchanges y Topics
 - `supplier.events`: Eventos relacionados con proveedores
 - `order.events`: Eventos relacionados con órdenes
 - `stock.events`: Eventos relacionados con stock
 - `notifications.events`: Eventos de notificaciones
+- `external.events`: Eventos desde sistemas externos
 
 ### Tipos de Eventos
 
@@ -87,13 +99,61 @@ El sistema utiliza RabbitMQ como event mesh para la comunicación entre microser
 - `solicitud.proveedor`: Solicitud de proveedor generada automáticamente
 
 #### Purchase Order Service
-- `orden_compra.generada`: Orden de compra generada
-- `orden_compra.enviada`: Orden de compra enviada
-- `orden_compra.confirmada`: Orden de compra confirmada
-- `orden_compra.recibida`: Orden de compra recibida
+- `orden.generada`: Orden de compra generada
+- `orden.confirmada`: Orden de compra confirmada
+- `orden.recibida`: Orden de compra recibida
 - `stock.bajo`: Stock bajo punto de reorden
-- `lote.danado`: Lote dañado por temperatura
-- `pronostico.demanda_alta`: Pronóstico de alta demanda
+- `stock.lote_danado`: Lote dañado por temperatura
+- `stock.demanda_alta`: Pronóstico de alta demanda
+
+#### Eventos Externos (Nuevos)
+- `external.stock.bajo`: Stock bajo detectado por sistema externo
+- `external.demanda.alta`: Demanda alta pronosticada por sistema externo
+- `external.lote.danado`: Lote dañado detectado por sistema externo
+- `external.alerta.inventario`: Alerta de inventario desde sistema externo
+
+## Funcionalidad de Eventos Externos
+
+### Descripción
+El sistema ahora puede recibir eventos desde sistemas externos (como sistemas de inventario hospitalarios, sensores de temperatura, sistemas de pronóstico de demanda) y generar órdenes de compra automáticamente.
+
+### Tipos de Eventos Externos Soportados
+
+#### 1. Stock Bajo Externo
+- **Trigger**: Sistema de inventario detecta stock por debajo del punto de reorden
+- **Acción**: Genera orden automática con prioridad ALTA
+- **Datos**: Producto, stock actual, punto reorden, cantidad requerida
+
+#### 2. Demanda Alta Externa
+- **Trigger**: Sistema de pronóstico predice alta demanda
+- **Acción**: Genera orden automática solo si confianza >= 80%
+- **Datos**: Producto, demanda pronosticada, confianza, período
+
+#### 3. Lote Dañado Externo
+- **Trigger**: Sistema de monitoreo detecta lote dañado
+- **Acción**: Genera orden de reposición con prioridad ALTA
+- **Datos**: Producto, lote, cantidad dañada, temperatura, motivo
+
+#### 4. Alerta de Inventario Externa
+- **Trigger**: Sistema de gestión de inventario emite alerta
+- **Acción**: Genera orden basada en tipo de alerta
+- **Datos**: Producto, tipo alerta, descripción, stock actual
+
+### Flujo de Procesamiento de Eventos Externos
+
+1. **Sistema Externo** publica evento en exchange `external.events`
+2. **RabbitMQ** enruta evento a cola `purchase-order-external-events`
+3. **Purchase Order Service** recibe y procesa evento
+4. **ExternalEventHandler** analiza evento y determina acción
+5. **OrderService** crea orden automáticamente
+6. **EventBus** publica evento `OrdenCompraGenerada`
+
+### Lógica de Decisión Inteligente
+
+- **Filtrado por confianza**: Solo procesa eventos de demanda alta con confianza >= 80%
+- **Mapeo de prioridades**: Convierte prioridades externas a enums internos
+- **Generación de números únicos**: Crea números de orden con prefijos específicos
+- **Trazabilidad completa**: Registra origen del evento en motivo de generación
 
 ## Escalado Automático con KEDA
 
@@ -118,7 +178,7 @@ El sistema utiliza KEDA para el escalado automático basado en:
 #### suppliers
 - **Clave primaria**: proveedor_id (String)
 - **GSI**: estado-index (estado_proveedor)
-- **Atributos**: nombre_legal, razon_social, estado_proveedor, etc.
+- **Atributos**: nombre_legal, razon_social, estado_proveedor, certificaciones, etc.
 
 #### audit_traces
 - **Clave primaria**: traza_id (String)
@@ -129,26 +189,36 @@ El sistema utiliza KEDA para el escalado automático basado en:
 - **Clave primaria**: orden_id (String)
 - **GSI**: estado-index (estado_orden)
 - **GSI**: proveedor-fecha-index (proveedor_id, fecha_generacion)
-- **Atributos**: numero_orden, proveedor_id, estado_orden, etc.
+- **Atributos**: numero_orden, proveedor_id, estado_orden, items, etc.
 
 #### products
 - **Clave primaria**: producto_id (String)
 - **GSI**: stock-index (stock_actual)
-- **Atributos**: nombre, stock_actual, punto_reorden, etc.
+- **Atributos**: nombre, stock_actual, punto_reorden, condiciones, etc.
 
 ## Desarrollo Local
 
 ### Prerrequisitos
 - Docker y Docker Compose
-- Go 1.21+
+- Go 1.23+
 - AWS CLI (para DynamoDB local)
+
+### Nota sobre Imágenes Docker
+Las imágenes Docker exportadas (.tar) exceden el límite de 100MB de GitHub y no están incluidas en el repositorio. Para generar las imágenes cuando sea necesario, usa:
+
+```bash
+# Generar imágenes de Docker
+./scripts/export-docker-images.sh
+```
+
+Ver `DOCKER_IMAGES.md` para más detalles sobre el manejo de imágenes.
 
 ### Ejecutar el Sistema
 
 1. **Clonar el repositorio**
 ```bash
 git clone <repository-url>
-cd mediplus
+cd medisupply
 ```
 
 2. **Ejecutar con Docker Compose**
@@ -161,6 +231,9 @@ docker-compose up -d
 # Health checks
 curl http://localhost:8082/health  # Supplier Service
 curl http://localhost:8081/health  # Purchase Order Service
+
+# RabbitMQ Management UI
+# http://localhost:15672 (usuario: mediplus, contraseña: mediplus123)
 ```
 
 ### APIs Disponibles
@@ -189,6 +262,66 @@ curl http://localhost:8081/health  # Purchase Order Service
 - `POST /api/v1/orders/:id/confirm` - Confirmar orden
 - `POST /api/v1/orders/:id/receive` - Marcar como recibida
 - `POST /api/v1/orders/auto-generate` - Generar orden automáticamente
+
+#### APIs de Eventos Externos (Puerto 8081)
+- `GET /api/v1/external/event-types` - Listar tipos de eventos externos disponibles
+- `POST /api/v1/external/simulate/stock-bajo` - Simular evento de stock bajo
+- `POST /api/v1/external/simulate/demanda-alta` - Simular evento de demanda alta
+- `POST /api/v1/external/simulate/lote-danado` - Simular evento de lote dañado
+- `POST /api/v1/external/simulate/alerta-inventario` - Simular alerta de inventario
+
+### Ejemplos de Uso de Eventos Externos
+
+#### Simular Stock Bajo
+```bash
+curl -X POST http://localhost:8081/api/v1/external/simulate/stock-bajo \
+  -H "Content-Type: application/json" \
+  -d '{
+    "producto_id": "PROD-001",
+    "nombre_producto": "Vacuna COVID-19",
+    "stock_actual": 5,
+    "punto_reorden": 20,
+    "stock_maximo": 100,
+    "cantidad_requerida": 50,
+    "prioridad": "ALTA",
+    "urgencia": "ALTA",
+    "source": "Sistema de Inventario Hospital Central"
+  }'
+```
+
+#### Simular Demanda Alta
+```bash
+curl -X POST http://localhost:8081/api/v1/external/simulate/demanda-alta \
+  -H "Content-Type: application/json" \
+  -d '{
+    "producto_id": "PROD-002",
+    "nombre_producto": "Insulina",
+    "demanda_pronosticada": 200,
+    "stock_actual": 30,
+    "cantidad_requerida": 100,
+    "confianza_pronostico": 0.85,
+    "periodo_pronostico": "30 días",
+    "prioridad": "MEDIA",
+    "source": "Sistema de Pronóstico de Demanda"
+  }'
+```
+
+#### Simular Lote Dañado
+```bash
+curl -X POST http://localhost:8081/api/v1/external/simulate/lote-danado \
+  -H "Content-Type: application/json" \
+  -d '{
+    "producto_id": "PROD-003",
+    "nombre_producto": "Vacuna Influenza",
+    "lote_id": "LOTE-2025-001",
+    "cantidad_danada": 25,
+    "temperatura_registrada": 8.5,
+    "temperatura_requerida": 2.0,
+    "motivo_danio": "Temperatura fuera de rango",
+    "urgencia": "ALTA",
+    "source": "Sistema de Monitoreo de Temperatura"
+  }'
+```
 
 ## Despliegue en Kubernetes
 
@@ -231,6 +364,7 @@ kubectl get scaledobjects
 - Logs estructurados en formato JSON
 - Niveles de log configurables
 - Integración con sistemas de logging centralizados
+- Trazabilidad completa de eventos externos
 
 ## Eventos de Negocio
 
@@ -305,6 +439,25 @@ El **Supplier Service** ahora escucha automáticamente los siguientes eventos de
 - TLS para comunicación entre servicios
 - Encriptación de datos en tránsito
 - Secrets management en Kubernetes
+
+## Integración con Sistemas Externos
+
+### Sistemas Soportados
+- Sistemas de inventario hospitalarios
+- Sistemas de pronóstico de demanda
+- Sensores de temperatura y monitoreo
+- Sistemas de gestión de cadena de frío
+- Sistemas de alertas de inventario
+
+### Protocolos de Comunicación
+- RabbitMQ AMQP para eventos
+- REST APIs para simulación y testing
+- Webhooks para integración directa
+
+### Configuración de Integración
+- Credenciales de RabbitMQ configurables
+- Routing keys personalizables
+- Filtros de eventos configurables
 
 ## Contribución
 

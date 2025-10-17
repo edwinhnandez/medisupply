@@ -70,6 +70,19 @@ func main() {
 			orders.POST("/:id/receive", orderHandler.ReceiveOrder)
 			orders.POST("/auto-generate", orderHandler.AutoGenerateOrder)
 		}
+
+		// Rutas para simulación de eventos externos
+		external := v1.Group("/external")
+		{
+			external.GET("/event-types", externalSimulatorHandler.GetExternalEventTypes)
+			simulate := external.Group("/simulate")
+			{
+				simulate.POST("/stock-bajo", externalSimulatorHandler.SimulateStockBajoExterno)
+				simulate.POST("/demanda-alta", externalSimulatorHandler.SimulateDemandaAltaExterna)
+				simulate.POST("/lote-danado", externalSimulatorHandler.SimulateLoteDanadoExterno)
+				simulate.POST("/alerta-inventario", externalSimulatorHandler.SimulateAlertaInventarioExterna)
+			}
+		}
 	}
 
 	// Health check

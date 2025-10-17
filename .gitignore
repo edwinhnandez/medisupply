@@ -22,3 +22,13 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# Docker images and exports
+*.tar
+*.tar.gz
+*.tar.bz2
+medisupply-*.tar
+docker-images/
+
+# AWS ECR exports
+ecr-exports/
