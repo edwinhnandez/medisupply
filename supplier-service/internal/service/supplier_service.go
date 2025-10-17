@@ -24,6 +24,9 @@ type SupplierService interface {
 	GetSuppliersWithColdChain() ([]*models.Proveedor, error)
 	ListSuppliersByEstado(estado models.EstadoProveedor) ([]*models.Proveedor, error)
 	CheckExpiringCertifications() error
+	ProcessOrderGeneratedEvent(orderEvent *events.OrdenCompraGeneradaEvent) error
+	ProcessOrderConfirmedEvent(orderEvent *events.OrdenCompraConfirmadaEvent) error
+	ProcessOrderReceivedEvent(orderEvent *events.OrdenCompraRecibidaEvent) error
 }
 
 // supplierService implementa SupplierService
@@ -443,4 +446,188 @@ func (s *supplierService) CheckExpiringCertifications() error {
 // ListSuppliersByEstado lista proveedores por estado
 func (s *supplierService) ListSuppliersByEstado(estado models.EstadoProveedor) ([]*models.Proveedor, error) {
 	return s.supplierRepo.ListByEstado(estado)
+}
+
+// ProcessOrderGeneratedEvent procesa un evento de orden de compra generada
+func (s *supplierService) ProcessOrderGeneratedEvent(orderEvent *events.OrdenCompraGeneradaEvent) error {
+	s.log.Infof("Processing order generated event for order: %s", orderEvent.OrdenID)
+
+	// Obtener proveedores activos que puedan cumplir con la orden
+	proveedores, err := s.supplierRepo.ListByEstado(models.EstadoActivo)
+	if err != nil {
+		s.log.Errorf("Error getting active suppliers: %v", err)
+		return err
+	}
+
+	if len(proveedores) == 0 {
+		s.log.Warn("No active suppliers found for order")
+		return nil
+	}
+
+	// Generar solicitud de proveedor
+	return s.generateSupplierRequest(orderEvent, proveedores)
+}
+
+// ProcessOrderConfirmedEvent procesa un evento de orden de compra confirmada
+func (s *supplierService) ProcessOrderConfirmedEvent(orderEvent *events.OrdenCompraConfirmadaEvent) error {
+	s.log.Infof("Processing order confirmed event for order: %s", orderEvent.OrdenID)
+
+	// Obtener el proveedor que confirmó la orden
+	proveedor, err := s.supplierRepo.GetByID(orderEvent.Data.ProveedorID)
+	if err != nil {
+		s.log.Errorf("Error getting supplier: %v", err)
+		return err
+	}
+
+	if proveedor == nil {
+		s.log.Warnf("Supplier not found: %s", orderEvent.Data.ProveedorID)
+		return nil
+	}
+
+	// Crear traza de auditoría
+	traza := &models.AuditoriaTraza{
+		TrazaID:       uuid.New().String(),
+		ProveedorID:   orderEvent.Data.ProveedorID,
+		TipoCambio:    "ORDEN_CONFIRMADA",
+		Descripcion:   "Orden de compra confirmada: " + orderEvent.Data.NumeroOrden,
+		ValorAnterior: "",
+		ValorNuevo:    orderEvent.Data.NumeroOrden,
+		UsuarioID:     "system",
+		FechaCambio:   time.Now(),
+		IPAddress:     "127.0.0.1",
+	}
+
+	err = s.auditRepo.CreateTraza(traza)
+	if err != nil {
+		s.log.Errorf("Error creating audit trace: %v", err)
+	}
+
+	s.log.WithFields(logrus.Fields{
+		"orden_id":     orderEvent.OrdenID,
+		"proveedor_id": orderEvent.Data.ProveedorID,
+		"numero_orden": orderEvent.Data.NumeroOrden,
+	}).Info("Order confirmed event processed successfully")
+
+	return nil
+}
+
+// ProcessOrderReceivedEvent procesa un evento de orden de compra recibida
+func (s *supplierService) ProcessOrderReceivedEvent(orderEvent *events.OrdenCompraRecibidaEvent) error {
+	s.log.Infof("Processing order received event for order: %s", orderEvent.OrdenID)
+
+	// Obtener el proveedor que entregó la orden
+	proveedor, err := s.supplierRepo.GetByID(orderEvent.Data.ProveedorID)
+	if err != nil {
+		s.log.Errorf("Error getting supplier: %v", err)
+		return err
+	}
+
+	if proveedor == nil {
+		s.log.Warnf("Supplier not found: %s", orderEvent.Data.ProveedorID)
+		return nil
+	}
+
+	// Crear traza de auditoría
+	traza := &models.AuditoriaTraza{
+		TrazaID:       uuid.New().String(),
+		ProveedorID:   orderEvent.Data.ProveedorID,
+		TipoCambio:    "ORDEN_RECIBIDA",
+		Descripcion:   "Orden de compra recibida: " + orderEvent.Data.NumeroOrden,
+		ValorAnterior: "",
+		ValorNuevo:    orderEvent.Data.NumeroOrden,
+		UsuarioID:     "system",
+		FechaCambio:   time.Now(),
+		IPAddress:     "127.0.0.1",
+	}
+
+	err = s.auditRepo.CreateTraza(traza)
+	if err != nil {
+		s.log.Errorf("Error creating audit trace: %v", err)
+	}
+
+	s.log.WithFields(logrus.Fields{
+		"orden_id":     orderEvent.OrdenID,
+		"proveedor_id": orderEvent.Data.ProveedorID,
+		"numero_orden": orderEvent.Data.NumeroOrden,
+	}).Info("Order received event processed successfully")
+
+	return nil
+}
+
+// generateSupplierRequest genera una solicitud de proveedor basada en la orden
+func (s *supplierService) generateSupplierRequest(orderEvent *events.OrdenCompraGeneradaEvent, proveedores []*models.Proveedor) error {
+	s.log.Infof("Generating supplier request for order: %s", orderEvent.OrdenID)
+
+	// Crear evento de solicitud de proveedor
+	event := &events.SolicitudProveedorEvent{
+		EventID:   uuid.New().String(),
+		EventType: events.EventTypeSolicitudProveedor,
+		OrdenID:   orderEvent.OrdenID,
+		Timestamp: time.Now(),
+	}
+
+	// Llenar datos del evento
+	event.Data.NumeroOrden = orderEvent.Data.NumeroOrden
+	event.Data.Prioridad = orderEvent.Data.Prioridad
+	event.Data.MotivoGeneracion = orderEvent.Data.MotivoGeneracion
+	event.Data.TotalItems = orderEvent.Data.TotalItems
+	event.Data.ValorTotal = orderEvent.Data.ValorTotal
+
+	// Determinar requisitos especiales basados en la prioridad
+	event.Data.RequisitosEspeciales = s.determineSpecialRequirements(orderEvent.Data.Prioridad)
+
+	// Agregar información de proveedores disponibles
+	event.Data.ProductosRequeridos = s.buildProductRequirements(orderEvent, proveedores)
+
+	// Publicar evento de solicitud de proveedor
+	err := s.eventBus.Publish(events.TopicProveedorEvents, event)
+	if err != nil {
+		s.log.Errorf("Error publishing supplier request event: %v", err)
+		return err
+	}
+
+	s.log.WithFields(logrus.Fields{
+		"event_id":     event.EventID,
+		"orden_id":     orderEvent.OrdenID,
+		"numero_orden": orderEvent.Data.NumeroOrden,
+		"prioridad":    orderEvent.Data.Prioridad,
+		"total_items":  orderEvent.Data.TotalItems,
+		"valor_total":  orderEvent.Data.ValorTotal,
+	}).Info("Supplier request event published successfully")
+
+	return nil
+}
+
+// determineSpecialRequirements determina los requisitos especiales basados en la prioridad
+func (s *supplierService) determineSpecialRequirements(prioridad string) []string {
+	requirements := []string{}
+
+	switch prioridad {
+	case "CRITICA":
+		requirements = append(requirements, "Entrega urgente", "Capacidad de respuesta 24/7", "Certificaciones médicas vigentes")
+	case "ALTA":
+		requirements = append(requirements, "Entrega rápida", "Certificaciones médicas vigentes")
+	case "MEDIA":
+		requirements = append(requirements, "Certificaciones médicas vigentes")
+	case "BAJA":
+		requirements = append(requirements, "Certificaciones básicas")
+	}
+
+	return requirements
+}
+
+// buildProductRequirements construye los requisitos de productos basados en la orden
+func (s *supplierService) buildProductRequirements(orderEvent *events.OrdenCompraGeneradaEvent, proveedores []*models.Proveedor) []events.ProductoRequerido {
+	// Por simplicidad, crear un producto requerido genérico
+	// En un escenario real, esto vendría de la información detallada de la orden
+	productoRequerido := events.ProductoRequerido{
+		ProductoID:           "prod-generic",
+		NombreProducto:       "Producto Médico Genérico",
+		CantidadRequerida:    orderEvent.Data.TotalItems,
+		PrecioUnitario:       orderEvent.Data.ValorTotal / float64(orderEvent.Data.TotalItems),
+		TemperaturaRequerida: 2.0, // Temperatura de refrigeración por defecto
+		RequiereCadenaFrio:   true,
+	}
+
+	return []events.ProductoRequerido{productoRequerido}
 }

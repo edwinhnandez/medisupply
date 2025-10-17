@@ -49,6 +49,7 @@ func main() {
 
 	// Inicializar handlers
 	supplierHandler := handlers.NewSupplierHandler(supplierService, logger)
+	eventHandler := handlers.NewEventHandler(supplierService, logger)
 
 	// Configurar rutas
 	router := gin.Default()
@@ -80,6 +81,33 @@ func main() {
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: router,
+	}
+
+	// Suscribirse a eventos de órdenes
+	logger.Info("Subscribing to order events...")
+
+	// Suscribirse a eventos de orden generada
+	err = eventBus.Subscribe(events.TopicOrderEvents, "supplier-order-generated", eventHandler.HandleOrdenCompraGeneradaEvent)
+	if err != nil {
+		logger.Errorf("Error subscribing to order generated events: %v", err)
+	} else {
+		logger.Info("Successfully subscribed to order generated events")
+	}
+
+	// Suscribirse a eventos de orden confirmada
+	err = eventBus.Subscribe(events.TopicOrderEvents, "supplier-order-confirmed", eventHandler.HandleOrdenCompraConfirmadaEvent)
+	if err != nil {
+		logger.Errorf("Error subscribing to order confirmed events: %v", err)
+	} else {
+		logger.Info("Successfully subscribed to order confirmed events")
+	}
+
+	// Suscribirse a eventos de orden recibida
+	err = eventBus.Subscribe(events.TopicOrderEvents, "supplier-order-received", eventHandler.HandleOrdenCompraRecibidaEvent)
+	if err != nil {
+		logger.Errorf("Error subscribing to order received events: %v", err)
+	} else {
+		logger.Info("Successfully subscribed to order received events")
 	}
 
 	// Iniciar servidor en goroutine

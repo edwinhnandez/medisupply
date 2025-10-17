@@ -6,16 +6,18 @@ Sistema de microservicios para la gestión de aprovisionamiento médico basado e
 
 El sistema está compuesto por dos microservicios principales:
 
-### 1. Supplier Management Service (Puerto 8080)
+### 1. Supplier Management Service (Puerto 8082)
 - **Responsabilidad**: Gestión de proveedores calificados, certificaciones y evaluaciones
 - **Agregado Principal**: ProveedorCalificado
 - **Eventos**: ProveedorCalificado, ProveedorSuspendido, CertificacionPorVencer, EvaluacionActualizada
+- **Event Listeners**: Escucha eventos de órdenes de compra y genera solicitudes de proveedor automáticamente
 
 ### 2. Purchase Order Service (Puerto 8081)
 - **Responsabilidad**: Gestión de órdenes de compra automáticas y procesamiento de eventos externos
 - **Agregado Principal**: OrdenCompraAutomatica
 - **Eventos**: OrdenCompraGenerada, OrdenCompraEnviada, OrdenCompraConfirmada, OrdenCompraRecibida
-- **Eventos Externos**: StockBajoExterno, DemandaAltaExterna, LoteDanadoExterno, AlertaInventarioExterna
+
+- **Event Listeners**: Escucha eventos de stock bajo y genera órdenes automáticamente
 
 ## Tecnologías Utilizadas
 
@@ -65,7 +67,7 @@ medisupply/
 │   ├── purchase-order-service-deployment.yaml
 │   ├── supplier-service-scaledobject.yaml
 │   ├── purchase-order-service-scaledobject.yaml
-│   ├── nats-cluster.yaml
+│   ├── rabbitmq-cluster.yaml
 │   ├── dynamodb-local.yaml
 │   └── dynamodb-tables.yaml
 ├── scripts/                   # Scripts de inicialización
@@ -94,6 +96,7 @@ El sistema utiliza RabbitMQ como event mesh para la comunicación entre microser
 - `proveedor.activado`: Proveedor activado
 - `certificacion.por_vencer`: Certificación por vencer
 - `evaluacion.actualizada`: Evaluación actualizada
+- `solicitud.proveedor`: Solicitud de proveedor generada automáticamente
 
 #### Purchase Order Service
 - `orden.generada`: Orden de compra generada
@@ -226,7 +229,7 @@ docker-compose up -d
 3. **Verificar servicios**
 ```bash
 # Health checks
-curl http://localhost:8080/health  # Supplier Service
+curl http://localhost:8082/health  # Supplier Service
 curl http://localhost:8081/health  # Purchase Order Service
 
 # RabbitMQ Management UI
@@ -235,7 +238,7 @@ curl http://localhost:8081/health  # Purchase Order Service
 
 ### APIs Disponibles
 
-#### Supplier Service (Puerto 8080)
+#### Supplier Service (Puerto 8082)
 - `GET /api/v1/suppliers` - Listar proveedores
 - `POST /api/v1/suppliers` - Crear proveedor
 - `GET /api/v1/suppliers/:id` - Obtener proveedor
@@ -244,6 +247,11 @@ curl http://localhost:8081/health  # Purchase Order Service
 - `POST /api/v1/suppliers/:id/evaluate` - Evaluar proveedor
 - `POST /api/v1/suppliers/:id/suspend` - Suspender proveedor
 - `POST /api/v1/suppliers/:id/activate` - Activar proveedor
+
+**Event Listeners:**
+- Escucha `orden.generada` → Genera `solicitud.proveedor`
+- Escucha `orden.confirmada` → Registra confirmación en auditoría
+- Escucha `orden.recibida` → Registra recepción en auditoría
 
 #### Purchase Order Service (Puerto 8081)
 - `GET /api/v1/orders` - Listar órdenes
@@ -362,20 +370,47 @@ kubectl get scaledobjects
 
 ### Flujo de Eventos Típico
 
-1. **Stock Bajo** → `stock.bajo` event → Auto-generación de orden
-2. **Lote Dañado** → `stock.lote_danado` event → Auto-generación de orden
-3. **Pronóstico Alta Demanda** → `stock.demanda_alta` event → Auto-generación de orden
-4. **Orden Generada** → `orden.generada` event → Notificaciones
-5. **Orden Confirmada** → `orden.confirmada` event → Actualización de estado
-6. **Orden Recibida** → `orden.recibida` event → Finalización del proceso
+1. **Stock Bajo** → `stock.bajo` event → **Purchase Order Service escucha** → Auto-generación de orden
+2. **Lote Dañado** → `lote.danado` event → **Purchase Order Service escucha** → Auto-generación de orden
+3. **Pronóstico Alta Demanda** → `pronostico.demanda_alta` event → **Purchase Order Service escucha** → Auto-generación de orden
+4. **Orden Generada** → `orden_compra.generada` event → Notificaciones
+5. **Orden Enviada** → `orden_compra.enviada` event → Seguimiento
+6. **Orden Confirmada** → `orden_compra.confirmada` event → Actualización de estado
+7. **Orden Recibida** → `orden_compra.recibida` event → Finalización del proceso
 
-### Flujo de Eventos Externos
+### Event-Driven Order Generation
 
-1. **Sistema Externo** → `external.*` event → Procesamiento automático
-2. **Análisis de Evento** → Validación y filtrado
-3. **Generación de Orden** → Creación automática con priorización
-4. **Publicación de Evento** → `orden.generada` event
-5. **Trazabilidad** → Logs detallados del proceso
+El **Purchase Order Service** ahora escucha automáticamente los siguientes eventos y genera órdenes de compra:
+
+- **`stock.bajo`**: Cuando el stock de un producto está por debajo del punto de reorden
+- **`stock.lote_danado`**: Cuando se detecta un lote dañado por temperatura
+- **`stock.demanda_alta`**: Cuando se pronostica alta demanda para un producto
+
+#### Lógica de Generación Automática:
+- **Prioridad Inteligente**: 
+  - Stock = 0 → Prioridad CRÍTICA
+  - Stock ≤ PuntoReorden/2 → Prioridad ALTA
+  - Stock ≤ PuntoReorden → Prioridad MEDIA
+- **Cantidad Calculada**: Hasta el stock máximo del producto
+- **Prevención de Duplicados**: Verifica que no exista una orden pendiente para el mismo producto
+
+### Event-Driven Supplier Requests
+
+El **Supplier Service** ahora escucha automáticamente los siguientes eventos de órdenes y genera solicitudes de proveedor:
+
+- **`orden.generada`**: Cuando se crea una nueva orden de compra
+- **`orden.confirmada`**: Cuando un proveedor confirma una orden
+- **`orden.recibida`**: Cuando se recibe la entrega de una orden
+
+#### Lógica de Solicitud de Proveedor:
+- **Requisitos Especiales**: Basados en la prioridad de la orden
+  - `CRITICA`: Entrega urgente, respuesta 24/7, certificaciones médicas vigentes
+  - `ALTA`: Entrega rápida, certificaciones médicas vigentes
+  - `MEDIA`: Certificaciones médicas vigentes
+  - `BAJA`: Certificaciones básicas
+- **Productos Requeridos**: Información detallada de productos y cantidades
+- **Auditoría**: Trazabilidad completa de eventos de órdenes
+- **Evento Generado**: `solicitud.proveedor` con todos los requisitos
 
 ## Consideraciones de Escalabilidad
 

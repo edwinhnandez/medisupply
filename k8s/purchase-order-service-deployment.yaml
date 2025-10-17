@@ -30,20 +30,8 @@ spec:
           value: "8081"
         - name: AWS_REGION
           value: "us-east-1"
-        - name: AWS_ACCESS_KEY_ID
-          valueFrom:
-            secretKeyRef:
-              name: aws-credentials
-              key: access-key-id
-        - name: AWS_SECRET_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: aws-credentials
-              key: secret-access-key
-        - name: DYNAMODB_ENDPOINT
-          value: "http://dynamodb-local:8000"
         - name: RABBITMQ_URL
-          value: "amqp://mediplus:mediplus123@rabbitmq:5672/"
+          value: "amqp://mediplus:mediplus123@rabbitmq-cluster:5672/"
         - name: SUPPLIER_SERVICE_URL
           value: "http://supplier-service:8080"
         - name: ENVIRONMENT

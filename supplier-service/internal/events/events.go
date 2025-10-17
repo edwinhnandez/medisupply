@@ -168,6 +168,33 @@ type PronosticoDemandaAltaEvent struct {
 	} `json:"data"`
 }
 
+// SolicitudProveedorEvent se emite cuando se solicita un proveedor para una orden
+type SolicitudProveedorEvent struct {
+	EventID   string    `json:"event_id"`
+	EventType string    `json:"event_type"`
+	OrdenID   string    `json:"orden_id"`
+	Timestamp time.Time `json:"timestamp"`
+	Data      struct {
+		NumeroOrden          string              `json:"numero_orden"`
+		Prioridad            string              `json:"prioridad"`
+		MotivoGeneracion     string              `json:"motivo_generacion"`
+		TotalItems           int                 `json:"total_items"`
+		ValorTotal           float64             `json:"valor_total"`
+		RequisitosEspeciales []string            `json:"requisitos_especiales"`
+		ProductosRequeridos  []ProductoRequerido `json:"productos_requeridos"`
+	} `json:"data"`
+}
+
+// ProductoRequerido representa un producto requerido en la solicitud
+type ProductoRequerido struct {
+	ProductoID           string  `json:"producto_id"`
+	NombreProducto       string  `json:"nombre_producto"`
+	CantidadRequerida    int     `json:"cantidad_requerida"`
+	PrecioUnitario       float64 `json:"precio_unitario"`
+	TemperaturaRequerida float64 `json:"temperatura_requerida"`
+	RequiereCadenaFrio   bool    `json:"requiere_cadena_frio"`
+}
+
 // Constantes para los tipos de eventos
 const (
 	EventTypeProveedorCalificado    = "proveedor.calificado"
@@ -182,4 +209,5 @@ const (
 	EventTypeStockBajo              = "stock.bajo"
 	EventTypeLoteDanado             = "stock.lote_danado"
 	EventTypePronosticoDemandaAlta  = "stock.demanda_alta"
+	EventTypeSolicitudProveedor     = "solicitud.proveedor"
 )

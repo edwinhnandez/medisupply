@@ -49,15 +49,7 @@ func main() {
 
 	// Inicializar handlers
 	orderHandler := handlers.NewOrderHandler(orderService, logger)
-	externalEventHandler := handlers.NewExternalEventHandler(orderService, logger)
-	externalSimulatorHandler := handlers.NewExternalSimulatorHandler(eventBus, logger)
-
-	// Suscribirse a eventos externos para creación automática de órdenes
-	err = eventBus.Subscribe(events.TopicExternalEvents, "purchase-order-external-events", externalEventHandler.HandleExternalEvent)
-	if err != nil {
-		logger.Fatalf("Error subscribing to external events: %v", err)
-	}
-	logger.Info("Subscribed to external events for auto order generation")
+	eventHandler := handlers.NewEventHandler(orderService, logger)
 
 	// Configurar rutas
 	router := gin.Default()
@@ -102,6 +94,33 @@ func main() {
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: router,
+	}
+
+	// Suscribirse a eventos de stock
+	logger.Info("Subscribing to stock events...")
+
+	// Suscribirse a eventos de stock bajo
+	err = eventBus.Subscribe(events.TopicStockEvents, "purchase-order-stock-bajo", eventHandler.HandleStockBajoEvent)
+	if err != nil {
+		logger.Errorf("Error subscribing to stock low events: %v", err)
+	} else {
+		logger.Info("Successfully subscribed to stock low events")
+	}
+
+	// Suscribirse a eventos de lote dañado
+	err = eventBus.Subscribe(events.TopicStockEvents, "purchase-order-lote-danado", eventHandler.HandleLoteDanadoEvent)
+	if err != nil {
+		logger.Errorf("Error subscribing to damaged batch events: %v", err)
+	} else {
+		logger.Info("Successfully subscribed to damaged batch events")
+	}
+
+	// Suscribirse a eventos de pronóstico de alta demanda
+	err = eventBus.Subscribe(events.TopicStockEvents, "purchase-order-demanda-alta", eventHandler.HandlePronosticoDemandaAltaEvent)
+	if err != nil {
+		logger.Errorf("Error subscribing to high demand forecast events: %v", err)
+	} else {
+		logger.Info("Successfully subscribed to high demand forecast events")
 	}
 
 	// Iniciar servidor en goroutine

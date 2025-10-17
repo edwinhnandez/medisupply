@@ -20,8 +20,8 @@ if ! kubectl get crd scaledobjects.keda.sh &> /dev/null; then
     exit 1
 fi
 
-echo "Desplegando NATS Cluster..."
-kubectl apply -f k8s/nats-cluster.yaml
+echo "Desplegando RabbitMQ Cluster..."
+kubectl apply -f k8s/rabbitmq-cluster.yaml
 
 echo "Desplegando DynamoDB Local..."
 kubectl apply -f k8s/dynamodb-local.yaml
@@ -53,9 +53,9 @@ echo "Despliegue completado exitosamente!"
 
 echo ""
 echo "Información del despliegue:"
-echo "   - Supplier Service: http://localhost:8080"
-echo "   - Purchase Order Service: http://localhost:8081"
-echo "   - NATS Monitoring: http://localhost:8222"
+echo "   - Supplier Service: http://localhost:8082 (con event listeners para órdenes)"
+echo "   - Purchase Order Service: http://localhost:8081 (con event listeners para stock)"
+echo "   - RabbitMQ Management: http://localhost:15672"
 echo "   - DynamoDB Local: http://localhost:8000"
 
 echo ""
@@ -71,8 +71,14 @@ echo "   kubectl logs -l app=purchase-order-service"
 
 echo ""
 echo "Para probar los servicios:"
-echo "   curl http://localhost:8080/health"
+echo "   curl http://localhost:8082/health"
 echo "   curl http://localhost:8081/health"
+
+echo ""
+echo "Funcionalidades Event-Driven:"
+echo "   - Purchase Order Service escucha eventos de stock y genera órdenes automáticamente"
+echo "   - Supplier Service escucha eventos de órdenes y genera solicitudes de proveedor"
+echo "   - RabbitMQ maneja la comunicación entre microservicios"
 
 echo ""
 echo "¡MediPlus está listo para usar!"

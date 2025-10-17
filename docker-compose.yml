@@ -58,7 +58,7 @@ services:
       dockerfile: supplier-service/Dockerfile
     container_name: supplier-service
     ports:
-      - "8080:8080"
+      - "8082:8080"
     environment:
       - PORT=8080
       - AWS_REGION=us-east-1

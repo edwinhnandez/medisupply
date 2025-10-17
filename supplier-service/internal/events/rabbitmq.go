@@ -58,12 +58,15 @@ func NewRabbitMQEventBus(rabbitmqURL string, log *logrus.Logger) (*RabbitMQEvent
 
 	// Declarar colas principales
 	queues := map[string]string{
-		"proveedor.events":     TopicProveedorEvents,
-		"notifications":        TopicNotifications,
-		"stock.events":         TopicStockEvents,
-		"order.events":         TopicOrderEvents,
-		"proveedor.audit":      TopicProveedorEvents,
-		"proveedor.evaluation": TopicProveedorEvents,
+		"proveedor.events":         TopicProveedorEvents,
+		"notifications":            TopicNotifications,
+		"stock.events":             TopicStockEvents,
+		"order.events":             TopicOrderEvents,
+		"proveedor.audit":          TopicProveedorEvents,
+		"proveedor.evaluation":     TopicProveedorEvents,
+		"supplier-order-generated": TopicOrderEvents,
+		"supplier-order-confirmed": TopicOrderEvents,
+		"supplier-order-received":  TopicOrderEvents,
 	}
 
 	for queueName, exchange := range queues {
@@ -256,6 +259,8 @@ func (r *RabbitMQEventBus) getRoutingKey(event interface{}) string {
 		return "stock.lote_danado"
 	case *PronosticoDemandaAltaEvent:
 		return "stock.demanda_alta"
+	case *SolicitudProveedorEvent:
+		return "solicitud.proveedor"
 	default:
 		return "unknown"
 	}
@@ -284,8 +289,9 @@ func (r *RabbitMQEventBus) getEventType(event interface{}) string {
 		return "LoteDanado"
 	case *PronosticoDemandaAltaEvent:
 		return "PronosticoDemandaAlta"
+	case *SolicitudProveedorEvent:
+		return "SolicitudProveedor"
 	default:
 		return "Unknown"
 	}
 }
-
